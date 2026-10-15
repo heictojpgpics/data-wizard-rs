@@ -255,3 +255,66 @@ Next steps (Task 5+):
 - Implement exFAT boot sector parser
 - Wire up Tauri events for live scan progress
 - Add integration tests with real NTFS/FAT images (created on CI)
+
+---
+Task ID: 5
+Agent: main
+Task: Implement NTFS MFT walker, Tauri event streaming, integration tests, exFAT parser, public-source signature DB
+
+Work Log:
+- Step 1: NTFS MFT walker (crates/dw-ntfs/src/walker.rs)
+  - Refactored mft.rs from borrowed to owned data (removed Box::leak — critical for walking millions of records without leaking gigabytes)
+  - Added filename.rs: $FILE_NAME attribute parser (parent reference, UTF-16 name, 4 FILETIME timestamps, namespace constants)
+  - Added walker.rs: walk_mft() reads MFT record 0 ($MFT itself), decodes its $DATA run list, iterates every record, extracts file names + data runs, builds RecoveredEntry, emits progress events
+  - Handles deleted records (in-use bit clear), extension records (base_record_reference != 0), sparse MFT regions
+  - Wired up NtfsPlugin::scan() to call walk_mft()
+  - 25 NTFS tests (8 boot + 7 mft + 6 filename + 4 walker)
+
+- Step 2: Tauri events for live scan progress (src-tauri/src/progress_sink.rs)
+  - TauriProgressSink implements dw_core::ProgressSink, forwards events to webview via 'scan:progress' Tauri event
+  - dw-core Scan::run() implemented as real orchestrator: probes each plugin, runs matching one, handles cancellation
+  - start_scan command now spawns background tokio task that runs the scan
+  - React UI ScanningView listens for 'scan:progress' events, shows live progress bar + phase + counts
+  - ResultsView loads and displays results in a table with status badges
+  - Added ManualSourceEntry for scanning file-backed images
+
+- Step 3: Integration tests + CI verification (crates/dw-ntfs/examples/scan_image.rs + tests/integration.rs)
+  - scan_image example: standalone scanner binary, opens file image, runs NTFS plugin, prints results
+  - integration.rs: scan_ntfs_image (#[ignore], needs DW_TEST_IMAGE env var), scan_nonexistent_image_errors (always runs)
+  - CI verification workflow updated: creates NTFS VHD, copies 100 files, deletes 50, runs scan_image, verifies >= 10 entries, runs integration test
+  - Also added FAT32 VHD round-trip job
+
+- Step 4: exFAT boot sector parser (crates/dw-exfat/src/boot.rs)
+  - ExfatBootSectorRaw (repr(C, packed) Pod) + ExfatBoot (parsed, validated)
+  - Verifies: 'EXFAT   ' OEM ID, MustBeZero field, BytesPerSectorShift 9-12, SectorsPerClusterShift 0-25, NumberOfFats 1-2, FileSystemRevision 0x0100, boot signature
+  - Extracts: partition offset, volume length, FAT offset/length, cluster heap offset, cluster count, root dir first cluster, volume serial, volume flags
+  - 16 tests, all passing
+  - Wired up ExfatPlugin::probe()
+  - Added ExfatError::NotExfat variant
+
+- Step 5: Public-source signature DB (crates/dw-signatures/)
+  - assets/public-signatures/signatures.toml: 35+ signatures from PUBLIC sources (Gary Kessler GCF, NIST DFXML, Wikipedia, libmagic). Each has a 'source' citation field.
+  - build.rs: compiles TOML → Rust source at build time, embedded in binary. No runtime file dependency. Supports wildcard bytes (??).
+  - spec.rs: SignatureSpec (compile-time, 'static refs) + Signature (runtime, owned) + MagicByte = Option<u8>
+  - db.rs: SignatureDb::from_embedded() builds DB from compile-time const array
+  - matcher.rs: Matcher::find_headers() scans byte window with wildcard support
+  - 7 tests, all passing
+
+Stage Summary:
+- 62 total tests passing (25 NTFS + 13 FAT + 16 exFAT + 7 signatures + 1 integration)
+- Clippy clean with -D warnings, cargo fmt clean
+- 6 commits pushed to data-wizard-rs main
+- 1 commit pushed to data-wizard-ci (verification workflow update)
+- Real scan engine working: NTFS MFT walker + live progress streaming + results display
+- 3 FS parsers with probe capability (NTFS, FAT, exFAT)
+- 35+ file signatures embedded in binary from public sources
+
+Next steps (Task 6+):
+- Implement NTFS $INDEX_ROOT/$INDEX_ALLOCATION parsing for directory hierarchy resolution
+- Implement FAT directory walker (iterate root dir + subdirs, follow FAT chains)
+- Implement exFAT directory entry parser (generic-primary + stream-extension + file-name)
+- Wire up the carver (dw-carver) to run on unallocated clusters during deep scan
+- Add Windows disk enumeration (QueryDosDevice + FindFirstVolumeW) in list_disks command
+- Add real file recovery (read clusters, write to destination) in recover_files command
+- Add more signatures to the DB (target: 200+ from GCF)
+- Add fuzzing targets for each parser
