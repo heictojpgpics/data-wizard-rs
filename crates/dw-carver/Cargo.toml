@@ -24,6 +24,7 @@ tracing      = { workspace = true }
 bytes        = { workspace = true }
 bytemuck     = { workspace = true }
 serde        = { workspace = true }
+uuid         = { workspace = true }
 ahash        = "0.8"
 
 [dev-dependencies]

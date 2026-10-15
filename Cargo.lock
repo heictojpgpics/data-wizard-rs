@@ -188,6 +188,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -330,9 +331,11 @@ dependencies = [
  "async-trait",
  "bytemuck",
  "bytes",
+ "dw-carver",
  "dw-core",
  "dw-disk",
  "dw-ipc",
+ "dw-signatures",
  "memmap2",
  "parking_lot",
  "serde",

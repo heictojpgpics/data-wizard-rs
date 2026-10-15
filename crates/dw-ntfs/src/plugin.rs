@@ -86,7 +86,7 @@ impl FsPlugin for NtfsPlugin {
 
         let config = WalkConfig::default();
         let entries = walk_mft(
-            source,
+            Arc::clone(&source),
             &vbr,
             mode,
             results.clone(),
@@ -95,10 +95,29 @@ impl FsPlugin for NtfsPlugin {
         )
         .await?;
 
-        info!(entries, "NTFS scan complete");
+        info!(entries, "NTFS MFT walk complete");
 
-        // TODO: if mode == Deep, run the carver on unallocated clusters.
-        // For now, only the metadata walk is implemented.
+        // For deep scans, run the carver on the entire volume to find
+        // deleted files that are no longer in the MFT.
+        if mode == ScanMode::Deep {
+            info!("Starting carving pass (deep scan)");
+            let db = dw_signatures::SignatureDb::from_embedded();
+            let read_at = source.as_read_at();
+            let carved = dw_carver::header_footer::carve_region(
+                read_at.as_ref(),
+                0,
+                vbr.total_bytes,
+                &db,
+                &results,
+                &progress,
+                uuid::Uuid::now_v7(),
+                1 << 20, // 1 MiB chunks
+            )
+            .map_err(|e| dw_core::CoreError::Plugin(format!("carver error: {e}")))?;
+            info!(entries, carved, "NTFS deep scan complete (MFT + carving)");
+        } else {
+            info!(entries, "NTFS quick scan complete (MFT only)");
+        }
 
         Ok(())
     }
