@@ -25,6 +25,58 @@ pub trait DiskSource: Send + Sync {
     fn as_read_at(&self) -> Arc<dyn ReadAt>;
 }
 
+/// Hard cap on a single async read allocation. Deep-scan carvers read in
+/// multi-megabyte chunks; anything larger signals a corrupt length field
+/// and must fail fast instead of attempting a giant allocation.
+pub const MAX_SINGLE_READ: u64 = 32 * 1024 * 1024;
+
+/// Fill `buf` completely from `file` starting at `offset`, retrying short
+/// reads. Positional read APIs (`pread` / `ReadFile` with OVERLAPPED) may
+/// legally return fewer bytes than requested; accepting a short read as
+/// success would leave the buffer tail as zero-filled garbage that
+/// filesystem parsers would treat as on-disk data. EOF before the buffer
+/// is full is a typed [`DiskError::ShortRead`] error, never success.
+fn read_exact_at(
+    file: &std::fs::File,
+    offset: u64,
+    buf: &mut [u8],
+    source_size: u64,
+) -> DiskResult<()> {
+    let requested = buf.len() as u64;
+    if offset.saturating_add(requested) > source_size {
+        return Err(DiskError::OutOfRange {
+            offset,
+            len: requested,
+            source_size,
+        });
+    }
+    let mut filled = 0usize;
+    while filled < buf.len() {
+        let n = {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::FileExt;
+                file.read_at(&mut buf[filled..], offset + filled as u64)?
+            }
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::FileExt;
+                file.seek_read(&mut buf[filled..], offset + filled as u64)?
+            }
+        };
+        if n == 0 {
+            return Err(DiskError::ShortRead {
+                offset,
+                got: filled as u64,
+                requested,
+                source_size,
+            });
+        }
+        filled += n;
+    }
+    Ok(())
+}
+
 /// File-backed source -- opens a regular file (image) and serves reads
 /// from it via pread / ReadFile.
 pub struct FileBackedSource {
@@ -59,39 +111,9 @@ impl FileBackedSource {
     }
 }
 
-#[cfg(unix)]
 impl ReadAt for FileBackedSource {
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> DiskResult<()> {
-        use std::os::unix::fs::FileExt;
-        if offset.saturating_add(buf.len() as u64) > self.size {
-            return Err(DiskError::OutOfRange {
-                offset,
-                len: buf.len() as u64,
-                source_size: self.size,
-            });
-        }
-        let _ = self.file.read_at(buf, offset)?;
-        Ok(())
-    }
-
-    fn size(&self) -> u64 {
-        self.size
-    }
-}
-
-#[cfg(windows)]
-impl ReadAt for FileBackedSource {
-    fn read_at(&self, offset: u64, buf: &mut [u8]) -> DiskResult<()> {
-        use std::os::windows::fs::FileExt;
-        if offset.saturating_add(buf.len() as u64) > self.size {
-            return Err(DiskError::OutOfRange {
-                offset,
-                len: buf.len() as u64,
-                source_size: self.size,
-            });
-        }
-        let _ = self.file.seek_read(buf, offset)?;
-        Ok(())
+        read_exact_at(&self.file, offset, buf, self.size)
     }
 
     fn size(&self) -> u64 {
@@ -102,6 +124,12 @@ impl ReadAt for FileBackedSource {
 #[async_trait]
 impl DiskSource for FileBackedSource {
     async fn read_at_async(&self, offset: u64, len: u64) -> DiskResult<Bytes> {
+        if len > MAX_SINGLE_READ {
+            return Err(DiskError::RequestTooLarge {
+                len,
+                cap: MAX_SINGLE_READ,
+            });
+        }
         if offset.saturating_add(len) > self.size {
             return Err(DiskError::OutOfRange {
                 offset,
@@ -133,39 +161,9 @@ pub struct FileBackedReadAt {
     pub size: u64,
 }
 
-#[cfg(unix)]
 impl ReadAt for FileBackedReadAt {
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> DiskResult<()> {
-        use std::os::unix::fs::FileExt;
-        if offset.saturating_add(buf.len() as u64) > self.size {
-            return Err(DiskError::OutOfRange {
-                offset,
-                len: buf.len() as u64,
-                source_size: self.size,
-            });
-        }
-        let _ = self.file.read_at(buf, offset)?;
-        Ok(())
-    }
-
-    fn size(&self) -> u64 {
-        self.size
-    }
-}
-
-#[cfg(windows)]
-impl ReadAt for FileBackedReadAt {
-    fn read_at(&self, offset: u64, buf: &mut [u8]) -> DiskResult<()> {
-        use std::os::windows::fs::FileExt;
-        if offset.saturating_add(buf.len() as u64) > self.size {
-            return Err(DiskError::OutOfRange {
-                offset,
-                len: buf.len() as u64,
-                source_size: self.size,
-            });
-        }
-        let _ = self.file.seek_read(buf, offset)?;
-        Ok(())
+        read_exact_at(&self.file, offset, buf, self.size)
     }
 
     fn size(&self) -> u64 {
@@ -227,6 +225,12 @@ impl ReadAt for PartitionView {
 #[async_trait]
 impl DiskSource for PartitionView {
     async fn read_at_async(&self, offset: u64, len: u64) -> DiskResult<Bytes> {
+        if len > MAX_SINGLE_READ {
+            return Err(DiskError::RequestTooLarge {
+                len,
+                cap: MAX_SINGLE_READ,
+            });
+        }
         if offset.saturating_add(len) > self.size {
             return Err(DiskError::OutOfRange {
                 offset,
@@ -257,5 +261,82 @@ impl DiskSource for PartitionView {
             offset: self.offset,
             size: self.size,
         })
+    }
+}
+
+#[cfg(test)]
+mod strict_read_tests {
+    #![allow(clippy::panic, clippy::expect_used, clippy::unwrap_used)]
+    use super::*;
+
+    #[test]
+    fn read_beyond_source_end_is_rejected() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), b"0123456789").unwrap();
+        let src = FileBackedSource::open(temp.path()).unwrap();
+        let read_at = src.as_read_at();
+
+        let mut buf = [0u8; 8];
+        // Fully in range: OK.
+        read_at.read_at(2, &mut buf).unwrap();
+        assert_eq!(&buf, b"23456789");
+
+        // Starts in range, runs past the end: must error, not zero-fill.
+        let mut buf = [0xFFu8; 12];
+        let err = read_at.read_at(4, &mut buf).unwrap_err();
+        assert!(
+            matches!(err, DiskError::OutOfRange { .. }),
+            "expected OutOfRange, got {err:?}"
+        );
+
+        // Starts past the end: error.
+        let mut buf = [0u8; 4];
+        assert!(read_at.read_at(10, &mut buf).is_err());
+    }
+
+    #[test]
+    fn read_exactly_at_boundary_succeeds() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), b"0123456789").unwrap();
+        let src = FileBackedSource::open(temp.path()).unwrap();
+        let read_at = src.as_read_at();
+
+        let mut buf = [0u8; 10];
+        read_at.read_at(0, &mut buf).unwrap();
+        assert_eq!(&buf, b"0123456789");
+    }
+
+    #[tokio::test]
+    async fn async_read_caps_allocation() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), b"0123456789").unwrap();
+        let src = FileBackedSource::open(temp.path()).unwrap();
+
+        // Over-cap request: typed error, no giant allocation attempt.
+        let err = src.read_at_async(0, MAX_SINGLE_READ + 1).await.unwrap_err();
+        assert!(
+            matches!(err, DiskError::RequestTooLarge { .. }),
+            "expected RequestTooLarge, got {err:?}"
+        );
+
+        // In-range async read still works.
+        let bytes = src.read_at_async(0, 10).await.unwrap();
+        assert_eq!(&bytes[..], b"0123456789");
+    }
+
+    #[test]
+    fn partition_view_enforces_its_own_bounds() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), vec![0xA5u8; 4096]).unwrap();
+        let src = Arc::new(FileBackedSource::open(temp.path()).unwrap());
+        let view = PartitionView::new(src.as_read_at(), 512, 1024).unwrap();
+
+        let mut buf = [0u8; 16];
+        view.read_at(1000, &mut buf).unwrap();
+        assert!(buf.iter().all(|&b| b == 0xA5));
+
+        // Past the partition's own end (even though the source is larger).
+        let mut buf = [0u8; 16];
+        assert!(view.read_at(1024, &mut buf).is_err());
     }
 }

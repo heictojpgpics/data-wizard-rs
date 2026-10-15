@@ -72,6 +72,7 @@ impl FsPlugin for FatPlugin {
         mode: ScanMode,
         results: Arc<ResultsStore>,
         progress: Arc<dyn ProgressSink>,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
     ) -> CoreResult<()> {
         // Re-read the BPB.
         let bytes = source
@@ -114,7 +115,6 @@ impl FsPlugin for FatPlugin {
             let runs = fat_table.free_runs(bpb.count_of_clusters);
             let cluster_size = u64::from(bpb.bytes_per_cluster);
             let db = SignatureDb::from_embedded();
-            let scan_id = uuid::Uuid::now_v7();
             let read_at = source.as_read_at();
             let mut carved_total = 0u64;
             for &(first, len) in &runs {
@@ -126,11 +126,9 @@ impl FsPlugin for FatPlugin {
                     length,
                     &db,
                     &results,
-                    &progress,
-                    scan_id,
-                    1 << 20,
-                )
-                .unwrap_or(0);
+                    Some(&cancel),
+                    None, // sync per-chunk progress: plugin reports around the loop
+                );
                 carved_total += carved;
             }
             info!(

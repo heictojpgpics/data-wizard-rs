@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use parking_lot::RwLock;
 use tauri::AppHandle;
 use uuid::Uuid;
 
@@ -35,10 +34,7 @@ pub struct ScanRecord {
 
 impl ScanRecord {
     pub fn new(handle: ScanHandle, source_uri: String) -> Self {
-        Self {
-            handle,
-            source_uri,
-        }
+        Self { handle, source_uri }
     }
 
     /// Create a `TauriProgressSink` for this scan.

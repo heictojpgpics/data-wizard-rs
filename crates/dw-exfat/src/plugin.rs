@@ -69,6 +69,7 @@ impl FsPlugin for ExfatPlugin {
         mode: ScanMode,
         results: Arc<ResultsStore>,
         progress: Arc<dyn ProgressSink>,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
     ) -> CoreResult<()> {
         // Re-read the boot sector.
         let bytes = source
@@ -94,10 +95,11 @@ impl FsPlugin for ExfatPlugin {
 
         if mode == ScanMode::Deep {
             // Deep phase: carve exactly the unallocated regions.
-            let carved =
-                deep_carve_unallocated(&source, &boot, &fat, &outcome, &results, &progress)
-                    .await
-                    .unwrap_or(0);
+            let carved = deep_carve_unallocated(
+                &source, &boot, &fat, &outcome, &results, &progress, &cancel,
+            )
+            .await
+            .unwrap_or(0);
             tracing::info!(entries, carved, "exFAT deep scan complete (walk + carving)");
         } else {
             tracing::info!(entries, "exFAT quick scan complete (walk only)");
@@ -130,7 +132,8 @@ async fn deep_carve_unallocated(
     fat: &ExfatFat,
     outcome: &WalkOutcome,
     results: &Arc<ResultsStore>,
-    progress: &Arc<dyn ProgressSink>,
+    _progress: &Arc<dyn ProgressSink>,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Option<u64> {
     let bitmap_entry = outcome.bitmap.as_ref()?;
     let read_at = source.as_read_at();
@@ -145,7 +148,6 @@ async fn deep_carve_unallocated(
     }
 
     let db = dw_signatures::SignatureDb::from_embedded();
-    let scan_id = uuid::Uuid::now_v7();
     let mut carved_total = 0u64;
     for ext in extents {
         let carved = dw_carver::header_footer::carve_region(
@@ -154,11 +156,9 @@ async fn deep_carve_unallocated(
             ext.length,
             &db,
             results,
-            progress,
-            scan_id,
-            1 << 20,
-        )
-        .unwrap_or(0);
+            Some(cancel),
+            None, // sync per-chunk progress: plugin reports around the loop
+        );
         carved_total += carved;
     }
     Some(carved_total)

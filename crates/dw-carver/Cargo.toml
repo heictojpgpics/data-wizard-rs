@@ -29,3 +29,8 @@ ahash        = "0.8"
 
 [dev-dependencies]
 tempfile = "3.27"
+criterion = "0.8"
+
+[[bench]]
+name = "carve"
+harness = false

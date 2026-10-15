@@ -70,7 +70,13 @@ async fn scan_ntfs_image() {
     let results = ResultsStore::new(1_000_000, None);
     let progress = Arc::new(NoOpSink);
     plugin
-        .scan(source, ScanMode::Quick, results.clone(), progress)
+        .scan(
+            source,
+            ScanMode::Quick,
+            results.clone(),
+            progress,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
         .await
         .expect("scan should not error");
 

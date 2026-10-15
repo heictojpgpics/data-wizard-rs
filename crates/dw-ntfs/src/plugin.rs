@@ -66,6 +66,7 @@ impl FsPlugin for NtfsPlugin {
         mode: ScanMode,
         results: Arc<ResultsStore>,
         progress: Arc<dyn ProgressSink>,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
     ) -> CoreResult<()> {
         // Re-read the VBR to get the MFT offset + record size.
         let bytes = source
@@ -104,7 +105,6 @@ impl FsPlugin for NtfsPlugin {
             info!("Starting carving pass (deep scan)");
             let db = dw_signatures::SignatureDb::from_embedded();
             let read_at = source.as_read_at();
-            let scan_id = uuid::Uuid::now_v7();
 
             let mut carved: u64 = 0;
             let mut carved_regions = 0usize;
@@ -135,11 +135,9 @@ impl FsPlugin for NtfsPlugin {
                             vbr.total_bytes,
                             &db,
                             &results,
-                            &progress,
-                            scan_id,
-                            1 << 20,
-                        )
-                        .unwrap_or(0);
+                            Some(&cancel),
+                            None, // sync per-chunk progress: plugin reports around the loop
+                        );
                     } else {
                         // Cluster-granular free runs (bit = cluster, LSB-first).
                         let cluster_size = u64::from(vbr.bytes_per_cluster);
@@ -163,11 +161,9 @@ impl FsPlugin for NtfsPlugin {
                                     bytes,
                                     &db,
                                     &results,
-                                    &progress,
-                                    scan_id,
-                                    1 << 20,
-                                )
-                                .unwrap_or(0);
+                                    Some(&cancel),
+                                    None, // sync per-chunk progress: plugin reports around the loop
+                                );
                                 carved_regions += 1;
                             } else {
                                 cluster += 1;
@@ -188,11 +184,9 @@ impl FsPlugin for NtfsPlugin {
                         vbr.total_bytes,
                         &db,
                         &results,
-                        &progress,
-                        scan_id,
-                        1 << 20,
-                    )
-                    .unwrap_or(0);
+                        None,
+                        None, // sync per-chunk progress: plugin reports around the loop
+                    );
                     info!(
                         entries,
                         carved, "NTFS deep scan complete (MFT + whole-volume carving)"

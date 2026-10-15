@@ -147,6 +147,12 @@ impl ReadAt for WindowsRawSource {
 #[async_trait]
 impl DiskSource for WindowsRawSource {
     async fn read_at_async(&self, offset: u64, len: u64) -> DiskResult<Bytes> {
+        if len > crate::source::MAX_SINGLE_READ {
+            return Err(DiskError::RequestTooLarge {
+                len,
+                cap: crate::source::MAX_SINGLE_READ,
+            });
+        }
         let mut buf = vec![0u8; len as usize];
         <Self as ReadAt>::read_at(self, offset, &mut buf)?;
         Ok(Bytes::from(buf))

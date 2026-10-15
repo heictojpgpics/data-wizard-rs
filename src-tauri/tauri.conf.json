@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: asset: https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   },
   "bundle": {
@@ -40,6 +40,6 @@
     "copyright": "MIT OR Apache-2.0",
     "category": "Utility",
     "shortDescription": "State-of-the-art data recovery",
-    "longDescription": "Data Wizard — a free, open-source, state-of-the-art data recovery wizard for Windows. Rust core + Tauri 2 + React."
+    "longDescription": "Data Wizard is a free, open-source data recovery wizard for Windows, built on a Rust core with a Tauri 2 and React interface."
   }
 }

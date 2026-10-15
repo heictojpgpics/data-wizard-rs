@@ -1,6 +1,7 @@
 //! Scan lifecycle and configuration.
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -44,20 +45,33 @@ struct ScanInner {
     id: Uuid,
     config: RwLock<ScanConfig>,
     state: RwLock<ScanState>,
+    /// Cooperative cancellation flag. Set by `request_cancel`, polled by
+    /// the scan phases and (as a shared Arc) by the carver worker pool.
+    cancel: Arc<AtomicBool>,
     results: Arc<ResultsStore>,
 }
 
 impl ScanHandle {
     #[must_use]
     pub fn new(config: ScanConfig) -> Self {
+        Self::with_spill_dir(config, None)
+    }
+
+    /// Create a handle whose results store spills overflow entries to
+    /// `spill_dir` (the app layer points this at per-scan scratch space
+    /// under the app data dir; `None` keeps everything resident).
+    #[must_use]
+    pub fn with_spill_dir(config: ScanConfig, spill_dir: Option<std::path::PathBuf>) -> Self {
         let id = Uuid::now_v7();
         let capacity = config.max_results.max(10_000);
+        let spill_path = spill_dir.map(|d| d.join(format!("{}.spill", id)));
         Self {
             inner: Arc::new(ScanInner {
                 id,
                 config: RwLock::new(config),
                 state: RwLock::new(ScanState::Created),
-                results: ResultsStore::new(capacity, None),
+                cancel: Arc::new(AtomicBool::new(false)),
+                results: ResultsStore::new(capacity, spill_path),
             }),
         }
     }
@@ -97,6 +111,7 @@ impl ScanHandle {
                 id,
                 config: RwLock::new(config),
                 state: RwLock::new(state),
+                cancel: Arc::new(AtomicBool::new(false)),
                 results,
             }),
         })
@@ -104,6 +119,27 @@ impl ScanHandle {
 
     pub fn set_state(&self, state: ScanState) {
         *self.inner.state.write() = state;
+    }
+
+    /// Request cooperative cancellation. Long-running inner loops (the
+    /// carver worker pool, plugin walks) poll [`Self::is_cancelled`] and
+    /// bail early; phase transitions in `Scan::run` also check it.
+    pub fn request_cancel(&self) {
+        self.inner
+            .cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.inner.cancel.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Shared handle to the cancellation flag (for handing to plugin
+    /// scans and carver worker pools).
+    #[must_use]
+    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.inner.cancel)
     }
 
     pub fn config(&self) -> ScanConfig {
@@ -204,12 +240,14 @@ impl Scan {
         self.handle.set_state(state);
 
         let results = self.handle.results();
+        let cancel = self.handle.cancel_flag();
         let result = plugin
             .scan(
                 Arc::clone(&self.source),
                 mode,
                 results,
                 Arc::clone(&self.progress),
+                cancel,
             )
             .await;
 

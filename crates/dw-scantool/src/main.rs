@@ -180,8 +180,19 @@ async fn main() {
         return;
     };
     println!("engine: {}", plugin.name());
+    // Ctrl-C wires straight into the cooperative cancel flag.
+    let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let cancel = std::sync::Arc::clone(&cancel);
+        tokio::spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                eprintln!("cancelling...");
+            }
+        });
+    }
     plugin
-        .scan(source, mode, results.clone(), progress)
+        .scan(source, mode, results.clone(), progress, cancel)
         .await
         .expect("scan");
 
