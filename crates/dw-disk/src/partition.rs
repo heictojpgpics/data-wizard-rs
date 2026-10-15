@@ -79,9 +79,7 @@ pub fn discover_partitions(read_at: &dyn crate::ReadAt) -> DiskResult<Discovered
 impl DiscoveredTable {
     /// Convert to the canonical geometry representation used by the app.
     pub fn into_geometry(self) -> crate::geometry::PartitionTable {
-        use crate::geometry::{
-            Partition, PartitionTable as GeoTable, PartitionType,
-        };
+        use crate::geometry::{Partition, PartitionTable as GeoTable, PartitionType};
 
         let (kind, raw): (PartitionType, Vec<PartitionEntry>) = match self {
             DiscoveredTable::Gpt { entries, .. } => (PartitionType::Gpt, entries),

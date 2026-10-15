@@ -115,6 +115,18 @@ mod tests {
     }
 
     #[test]
+    fn embedded_signatures_meet_coverage_target() {
+        // Product target: 200+ formats from public sources (GCF +
+        // Wikipedia list, cross-cited per entry).
+        let db = SignatureDb::from_embedded();
+        assert!(
+            db.len() >= 200,
+            "signature DB fell below the 200+ coverage target: {}",
+            db.len()
+        );
+    }
+
+    #[test]
     fn embedded_signatures_include_known_formats() {
         let db = SignatureDb::from_embedded();
         let extensions: std::collections::HashSet<&str> =

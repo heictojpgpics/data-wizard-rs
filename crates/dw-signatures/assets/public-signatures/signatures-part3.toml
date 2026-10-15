@@ -1,0 +1,1496 @@
+# Public-source file signatures for dw-signatures (part 3).
+#
+# EVERY entry in this file is derived verbatim from the Wikipedia
+# "List of file signatures" table (https://en.wikipedia.org/wiki/List_of_file_signatures),
+# fetched and parsed on 2026-10-16. The `source` field of each entry quotes the
+# table row description. No proprietary data is used.
+#
+# Fields follow the same schema as signatures.toml. Weights are computed
+# from magic length (500 + 75 * len, capped at 950) — longer magic,
+# higher confidence. min_size = magic length + 16. max_size = 0 (the
+# carver applies its own analysis cap).
+
+[[signature]]
+extension = "cwk"
+header_offset = 0
+header_magic = "02 00 5A 57 52 54 00 00 00 00 00 00 00 00 00 00"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Claris Works word processing doc"
+
+[[signature]]
+extension = "wk1"
+header_offset = 0
+header_magic = "00 00 02 00 06 04 06 00 08 00 00 00 00 00"
+tail_offset = 0
+min_size = 30
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Lotus 1-2-3 spreadsheet (v1) file"
+
+[[signature]]
+extension = "wk3"
+header_offset = 0
+header_magic = "00 00 1A 00 00 10 04 00 00 00 00 00"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Lotus 1-2-3 spreadsheet (v3) file"
+
+[[signature]]
+extension = "wk4"
+header_offset = 0
+header_magic = "00 00 1A 00 02 10 04 00 00 00 00 00"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Lotus 1-2-3 spreadsheet (v4, v5) file"
+
+[[signature]]
+extension = "123"
+header_offset = 0
+header_magic = "00 00 1A 00 05 10 04"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Lotus 1-2-3 spreadsheet (v9) file"
+
+[[signature]]
+extension = "qxd"
+header_offset = 0
+header_magic = "00 00 49 49 58 50 52"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Quark Express document"
+
+[[signature]]
+extension = "psafe3"
+header_offset = 0
+header_magic = "50 57 53 33"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Password Gorilla Password Database"
+
+[[signature]]
+extension = "pcap"
+header_offset = 0
+header_magic = "D4 C3 B2 A1"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Libpcap File Format [ 2 ]"
+
+[[signature]]
+extension = "pcapng"
+header_offset = 0
+header_magic = "0A 0D 0D 0A"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: PCAP Next Generation Dump File Format [ 3 ]"
+
+[[signature]]
+extension = "rpm"
+header_offset = 0
+header_magic = "ED AB EE DB"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: RedHat Package Manager (RPM) package [ 4 ]"
+
+[[signature]]
+extension = "sqlitedb"
+header_offset = 0
+header_magic = "53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: SQLite Database [ 5 ]"
+
+[[signature]]
+extension = "bin"
+header_offset = 0
+header_magic = "53 50 30 31"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Amazon Kindle Update Package [ 6 ]"
+
+[[signature]]
+extension = "wad"
+header_offset = 0
+header_magic = "49 57 41 44"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: internal WAD (main resource file of Doom ) [ 7 ]"
+
+[[signature]]
+extension = "dba"
+header_offset = 0
+header_magic = "BE BA FE CA"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Palm Desktop Calendar Archive"
+
+[[signature]]
+extension = "tda"
+header_offset = 0
+header_magic = "00 01 44 54"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Palm Desktop Calendar Archive"
+
+[[signature]]
+extension = "tdf"
+header_offset = 0
+header_magic = "54 44 46 24"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Telegram Desktop File"
+
+[[signature]]
+extension = "tdef"
+header_offset = 0
+header_magic = "54 44 45 46"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Telegram Desktop Encrypted File"
+
+[[signature]]
+extension = "icns"
+header_offset = 0
+header_magic = "69 63 6E 73"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Apple Icon Image format"
+
+[[signature]]
+extension = "lzh"
+header_offset = 2
+header_magic = "2D 6C 68 30 2D"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 875
+source = "Wikipedia List of file signatures: Lempel Ziv Huffman archive file Method 0 (No compression)"
+
+[[signature]]
+extension = "bac"
+header_offset = 0
+header_magic = "42 41 43 4B 4D 49 4B 45 44 49 53 4B"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: AmiBack Amiga Backup data file"
+
+[[signature]]
+extension = "idx"
+header_offset = 0
+header_magic = "49 4E 44 58"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: AmiBack Amiga Backup index file"
+
+[[signature]]
+extension = "plist"
+header_offset = 0
+header_magic = "62 70 6C 69 73 74"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Binary Property List file"
+
+[[signature]]
+extension = "cr2"
+header_offset = 0
+header_magic = "49 49 2A 00 10 00 00 00 43 52"
+tail_offset = 0
+min_size = 26
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Canon RAW Format Version 2 [ 12 ] Canon's RAW format is based on TIFF. [ 13 ]"
+
+[[signature]]
+extension = "cin"
+header_offset = 0
+header_magic = "80 2A 5F D7"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Kodak Cineon image"
+
+[[signature]]
+extension = "nui"
+header_offset = 0
+header_magic = "4E 55 52 55 49 4D 47 4E 55 52 55 50 41 4C"
+tail_offset = 0
+min_size = 30
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: nuru ASCII/ANSI image and palette files [ 15 ]"
+
+[[signature]]
+extension = "exr"
+header_offset = 0
+header_magic = "76 2F 31 01"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: OpenEXR image"
+
+[[signature]]
+extension = "bpg"
+header_offset = 0
+header_magic = "42 50 47 FB"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Better Portable Graphics format [ 16 ]"
+
+[[signature]]
+extension = "jp2"
+header_offset = 0
+header_magic = "00 00 00 0C 6A 50 20 20 0D 0A 87 0A"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: JPEG 2000 format [ 18 ]"
+
+[[signature]]
+extension = "qoi"
+header_offset = 0
+header_magic = "71 6F 69 66"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: QOI - The “Quite OK Image Format” [ 19 ]"
+
+[[signature]]
+extension = "cpio"
+header_offset = 0
+header_magic = "30 37 30 37 30 31"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: cpio \"new\" ASCII archive file"
+
+[[signature]]
+extension = "ssp"
+header_offset = 0
+header_magic = "53 4D 53 4E 46 32 30 30"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: SmartSniff Packets File [ 22 ]"
+
+[[signature]]
+extension = "none"
+header_offset = 0
+header_magic = "7F 45 4C 46"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Executable and Linkable Format [ 25 ]"
+
+[[signature]]
+extension = "hdf4"
+header_offset = 0
+header_magic = "0E 03 13 01"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Data stored in version 4 of the Hierarchical Data Format ."
+
+[[signature]]
+extension = "txt"
+header_offset = 0
+header_magic = "EF BB BF"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: UTF-8 byte order mark , commonly seen in text files. [ 28 ] [ 29 ] [ 30 ]"
+
+[[signature]]
+extension = "asf"
+header_offset = 0
+header_magic = "30 26 B2 75 8E 66 CF 11 A6 D9 00 AA 00 62 CE 6C"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Advanced Systems Format [ 37 ]"
+
+[[signature]]
+extension = "mgw"
+header_offset = 0
+header_magic = "6D 61 69 6E 2E 62 73"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Nintendo Game & Watch image file"
+
+[[signature]]
+extension = "g64"
+header_offset = 0
+header_magic = "47 53 52 2D 31 35 34 31"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Commodore 64 1541 disk image (G64 format)"
+
+[[signature]]
+extension = "crt"
+header_offset = 0
+header_magic = "43 36 34 20 43 41 52 54 52 49 44 47 45 20 20 20"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Commodore 64 cartridge image"
+
+[[signature]]
+extension = "crx"
+header_offset = 0
+header_magic = "43 72 32 34"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Google Chrome extension [ 48 ] or packaged app [ 49 ]"
+
+[[signature]]
+extension = "fh8"
+header_offset = 0
+header_magic = "41 47 44 33"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: FreeHand 8 document [ 50 ] [ 51 ]"
+
+[[signature]]
+extension = "toast"
+header_offset = 0
+header_magic = "45 52 02 00 00 00"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Roxio Toast disc image file"
+
+[[signature]]
+extension = "xar"
+header_offset = 0
+header_magic = "78 61 72 21"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: eXtensible ARchive format [ 52 ]"
+
+[[signature]]
+extension = "dat"
+header_offset = 0
+header_magic = "50 4D 4F 43 43 4D 4F 43"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Windows Files And Settings Transfer Repository [ 53 ] See also USMT 3.0 (Win XP) [ 54 ] and USMT 4.0"
+
+[[signature]]
+extension = "nes"
+header_offset = 0
+header_magic = "4E 45 53 1A"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Nintendo Entertainment System ROM file [ 56 ]"
+
+[[signature]]
+extension = "oar"
+header_offset = 0
+header_magic = "4F 41 52 ??"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: OAR file archive format, where ?? is the format version."
+
+[[signature]]
+extension = "tox"
+header_offset = 0
+header_magic = "74 6F 78 33"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Open source portable voxel file [ 58 ]"
+
+[[signature]]
+extension = "mlv"
+header_offset = 0
+header_magic = "4D 4C 56 49"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Magic Lantern Video file [ 59 ]"
+
+[[signature]]
+extension = "lz4"
+header_offset = 0
+header_magic = "04 22 4D 18"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: LZ4 Frame Format [ 62 ] Remark: LZ4 block format does not offer any magic bytes. [ 63 ]"
+
+[[signature]]
+extension = "flif"
+header_offset = 0
+header_magic = "46 4C 49 46"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Free Lossless Image Format"
+
+[[signature]]
+extension = "stg"
+header_offset = 0
+header_magic = "4D 49 4C 20"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: \"SEAN : Session Analysis\" Training file. Also used in compatible software \"Rpw : Rowperfect for Wind"
+
+[[signature]]
+extension = "djvu"
+header_offset = 0
+header_magic = "41 54 26 54 46 4F 52 4D ?? ?? ?? ?? 44 4A 56"
+tail_offset = 0
+min_size = 31
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: DjVu document The following byte is either 55 ( U ) for single-page or 4D ( M ) for multi-page docum"
+
+[[signature]]
+extension = "dcm"
+header_offset = 128
+header_magic = "44 49 43 4D"
+tail_offset = 0
+min_size = 148
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: DICOM Medical File Format"
+
+[[signature]]
+extension = "woff2"
+header_offset = 0
+header_magic = "77 4F 46 32"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: WOFF File Format 2.0 [ 65 ]"
+
+[[signature]]
+extension = "wasm"
+header_offset = 0
+header_magic = "00 61 73 6D"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: WebAssembly binary format [ 67 ]"
+
+[[signature]]
+extension = "lep"
+header_offset = 0
+header_magic = "CF 84 01"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Lepton compressed JPEG image [ 68 ]"
+
+[[signature]]
+extension = "swf"
+header_offset = 0
+header_magic = "43 57 53"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Adobe Flash .swf"
+
+[[signature]]
+extension = "deb"
+header_offset = 0
+header_magic = "21 3C 61 72 63 68 3E 0A"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: linux deb file"
+
+[[signature]]
+extension = "m2p"
+header_offset = 0
+header_magic = "00 00 01 BA"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: MPEG Program Stream (MPEG-1 Part 1 (essentially identical) and MPEG-2 Part 1)"
+
+[[signature]]
+extension = "lzfse"
+header_offset = 0
+header_magic = "62 76 78 32"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: LZFSE - Lempel-Ziv style data compression algorithm using Finite State Entropy coding. OSS by Apple."
+
+[[signature]]
+extension = "orc"
+header_offset = 0
+header_magic = "4F 52 43"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Apache ORC (Optimized Row Columnar) file format"
+
+[[signature]]
+extension = "avro"
+header_offset = 0
+header_magic = "4F 62 6A 01"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Apache Avro binary file format"
+
+[[signature]]
+extension = "rc"
+header_offset = 0
+header_magic = "53 45 51 36"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: RCFile columnar file format"
+
+[[signature]]
+extension = "rbxl"
+header_offset = 0
+header_magic = "3C 72 6F 62 6C 6F 78 21"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Roblox place file [ 73 ]"
+
+[[signature]]
+extension = "p25"
+header_offset = 0
+header_magic = "65 87 78 56"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: PhotoCap Object Templates"
+
+[[signature]]
+extension = "pcv"
+header_offset = 0
+header_magic = "55 55 AA AA"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: PhotoCap Vector"
+
+[[signature]]
+extension = "pbt"
+header_offset = 0
+header_magic = "78 56 34"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: PhotoCap Template"
+
+[[signature]]
+extension = "ez2"
+header_offset = 0
+header_magic = "45 4D 58 32"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Emulator Emaxsynth samples"
+
+[[signature]]
+extension = "ez3"
+header_offset = 0
+header_magic = "45 4D 55 33"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Emulator III synth samples"
+
+[[signature]]
+extension = "luac"
+header_offset = 0
+header_magic = "1B 4C 75 61"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Lua bytecode [ 74 ]"
+
+[[signature]]
+extension = "alias"
+header_offset = 0
+header_magic = "62 6F 6F 6B 00 00 00 00 6D 61 72 6B 00 00 00 00"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: macOS file Alias [ 75 ] ( Symbolic link )"
+
+[[signature]]
+extension = "identifier"
+header_offset = 0
+header_magic = "5B 5A 6F 6E 65 54 72 61 6E 73 66 65 72 5D"
+tail_offset = 0
+min_size = 30
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Microsoft Zone Identifier for URL Security Zones [ 76 ] [ 77 ]"
+
+[[signature]]
+extension = "tde"
+header_offset = 0
+header_magic = "20 02 01 62 A0 1E AB 07 02 00 00 00"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Tableau Datasource"
+
+[[signature]]
+extension = "kdb"
+header_offset = 0
+header_magic = "37 48 03 02 00 00 00 00 58 35 30 39 4B 45 59"
+tail_offset = 0
+min_size = 31
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: KDB file"
+
+[[signature]]
+extension = "pgp"
+header_offset = 0
+header_magic = "85 ?? ?? 03"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: PGP file [ 78 ]"
+
+[[signature]]
+extension = "rs"
+header_offset = 0
+header_magic = "52 53 56 4B 44 41 54 41"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: QuickZip rs compressed archive [ 81 ] [ 82 ]"
+
+[[signature]]
+extension = "sml"
+header_offset = 0
+header_magic = "3A 29 0A"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Smile file"
+
+[[signature]]
+extension = "vpk"
+header_offset = 0
+header_magic = "34 12 AA 55"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: VPK file, used to store game data for some Source Engine games"
+
+[[signature]]
+extension = "ace"
+header_offset = 7
+header_magic = "2A 2A 41 43 45 2A 2A"
+tail_offset = 0
+min_size = 30
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: ACE (compressed file format) [ citation needed ]"
+
+[[signature]]
+extension = "zoo"
+header_offset = 0
+header_magic = "5A 4F 4F"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Zoo (file format)"
+
+[[signature]]
+extension = "pbm"
+header_offset = 0
+header_magic = "50 31 0A"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Portable bitmap ASCII"
+
+[[signature]]
+extension = "pgm"
+header_offset = 0
+header_magic = "50 32 0A"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Portable Gray Map ASCII"
+
+[[signature]]
+extension = "ppm"
+header_offset = 0
+header_magic = "50 33 0A"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Portable Pixmap ASCII"
+
+[[signature]]
+extension = "wmf"
+header_offset = 0
+header_magic = "D7 CD C6 9A"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Windows Metafile"
+
+[[signature]]
+extension = "xpm"
+header_offset = 0
+header_magic = "2F 2A 20 58 50 4D 20 2A 2F"
+tail_offset = 0
+min_size = 25
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: X PixMap"
+
+[[signature]]
+extension = "aff"
+header_offset = 0
+header_magic = "41 46 46"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Advanced Forensics Format"
+
+[[signature]]
+extension = "ex01"
+header_offset = 0
+header_magic = "45 56 46 32"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: EnCase EWF version 2 format"
+
+[[signature]]
+extension = "e01"
+header_offset = 0
+header_magic = "45 56 46"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: EnCase EWF version 1 format"
+
+[[signature]]
+extension = "qcow"
+header_offset = 0
+header_magic = "51 46 49"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: qcow file format"
+
+[[signature]]
+extension = "ani"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 41 43 4F 4E"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Animated cursor"
+
+[[signature]]
+extension = "cda"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 43 44 44 41"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: .cda file"
+
+[[signature]]
+extension = "qcp"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 51 4C 43 4D"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Qualcomm PureVoice file format"
+
+[[signature]]
+extension = "dcr"
+header_offset = 0
+header_magic = "52 49 46 58 ?? ?? ?? ?? 46 47 44 4D"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Adobe Shockwave [ 83 ] [ 84 ] [ 85 ]"
+
+[[signature]]
+extension = "dir"
+header_offset = 0
+header_magic = "52 49 46 58 ?? ?? ?? ?? 4D 56 39 33"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Macromedia Director file format [ 86 ] [ 84 ] [ 85 ]"
+
+[[signature]]
+extension = "isz"
+header_offset = 0
+header_magic = "49 73 5A 21"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Compressed ISO image"
+
+[[signature]]
+extension = "daa"
+header_offset = 0
+header_magic = "44 41 41"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Direct Access Archive PowerISO"
+
+[[signature]]
+extension = "evt"
+header_offset = 0
+header_magic = "4C 66 4C 65"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Windows Event Viewer file format"
+
+[[signature]]
+extension = "evtx"
+header_offset = 0
+header_magic = "45 6C 66 46 69 6C 65"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Windows Event Viewer XML file format"
+
+[[signature]]
+extension = "sdb"
+header_offset = 8
+header_magic = "73 64 62 66"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Windows customized database"
+
+[[signature]]
+extension = "grp"
+header_offset = 0
+header_magic = "50 4D 43 43"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Windows 3.x Program Manager Program Group file format"
+
+[[signature]]
+extension = "icm"
+header_offset = 0
+header_magic = "4B 43 4D 53"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: ICC profile"
+
+[[signature]]
+extension = "drc"
+header_offset = 0
+header_magic = "44 52 41 43 4F"
+tail_offset = 0
+min_size = 21
+max_size = 0
+weight = 875
+source = "Wikipedia List of file signatures: 3D model compressed with Google Draco [ 88 ]"
+
+[[signature]]
+extension = "grib"
+header_offset = 0
+header_magic = "47 52 49 42"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Gridded data (commonly weather observations or forecasts) in the WMO GRIB or GRIB2 format [ 89 ]"
+
+[[signature]]
+extension = "blend"
+header_offset = 0
+header_magic = "42 4C 45 4E 44 45 52"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Blender File Format [ 90 ]"
+
+[[signature]]
+extension = "jxl"
+header_offset = 0
+header_magic = "00 00 00 0C 4A 58 4C 20 0D 0A 87 0A"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Image encoded in the JPEG XL format [ 91 ]"
+
+[[signature]]
+extension = "slob"
+header_offset = 0
+header_magic = "21 2D 31 53 4C 4F 42 1F"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Slob (sorted list of Object storages ) is a read-only, compressed data store with dictionary-like in"
+
+[[signature]]
+extension = "au"
+header_offset = 0
+header_magic = "2E 73 6E 64"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Au audio file format"
+
+[[signature]]
+extension = "hazelrules"
+header_offset = 0
+header_magic = "48 5A 4C 52 00 00 00 18"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Noodlesoft Hazel [ 97 ]"
+
+[[signature]]
+extension = "flp"
+header_offset = 0
+header_magic = "46 4C 68 64"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: FL Studio Project File"
+
+[[signature]]
+extension = "flm"
+header_offset = 0
+header_magic = "31 30 4C 46"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: FL Studio Mobile Project File"
+
+[[signature]]
+extension = "drw"
+header_offset = 0
+header_magic = "01 FF 02 04 03 02"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Micrografx vector graphic file"
+
+[[signature]]
+extension = "dss"
+header_offset = 0
+header_magic = "02 64 73 73"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Digital Speech Standard (Olympus, Grundig, & Phillips) v2"
+
+[[signature]]
+extension = "adx"
+header_offset = 0
+header_magic = "03 00 00 00 41 50 50 52"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Approach index file"
+
+[[signature]]
+extension = "indd"
+header_offset = 0
+header_magic = "06 06 ED F5 D8 1D 46 E5 BD 31 EF E7 FE 74 B7 1D"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Adobe InDesign document"
+
+[[signature]]
+extension = "skf"
+header_offset = 0
+header_magic = "07 53 4B 46"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: SkinCrafter skin file"
+
+[[signature]]
+extension = "dtd"
+header_offset = 0
+header_magic = "07 64 74 32 64 64 74 64"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: DesignTools 2D Design file"
+
+[[signature]]
+extension = "wallet"
+header_offset = 0
+header_magic = "0A 16 6F 72 67 2E 62 69 74 63 6F 69 6E 2E 70 72"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: MultiBit Bitcoin wallet file"
+
+[[signature]]
+extension = "nri"
+header_offset = 0
+header_magic = "0E 4E 65 72 6F 49 53 4F"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Nero CD Compilation"
+
+[[signature]]
+extension = "wks"
+header_offset = 0
+header_magic = "0E 57 4B 53"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: DeskMate Worksheet"
+
+[[signature]]
+extension = "sib"
+header_offset = 0
+header_magic = "0F 53 49 42 45 4C 49 55 53"
+tail_offset = 0
+min_size = 25
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Sibelius Music - Score file"
+
+[[signature]]
+extension = "sil"
+header_offset = 0
+header_magic = "23 21 53 49 4C 4B 0A"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Audio compression format developed by Skype"
+
+[[signature]]
+extension = "hdr"
+header_offset = 0
+header_magic = "23 3F 52 41 44 49 41 4E 43 45 0A"
+tail_offset = 0
+min_size = 27
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Radiance High Dynamic Range image file"
+
+[[signature]]
+extension = "vbe"
+header_offset = 0
+header_magic = "23 40 7E 5E"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: VBScript Encoded script"
+
+[[signature]]
+extension = "cdb"
+header_offset = 0
+header_magic = "0D F0 1D C0"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: MikroTik WinBox Connection Database (Address Book)"
+
+[[signature]]
+extension = "m3u"
+header_offset = 0
+header_magic = "23 45 58 54 4D 33 55"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Multimedia playlist"
+
+[[signature]]
+extension = "m"
+header_offset = 0
+header_magic = "6D 64 66 00"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: M2 Archive, used by game developer M2"
+
+[[signature]]
+extension = "pak"
+header_offset = 0
+header_magic = "4B 50 4B 41"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Capcom RE Engine game data archives"
+
+[[signature]]
+extension = "arc"
+header_offset = 0
+header_magic = "41 52 43"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Capcom MT Framework game data archives"
+
+[[signature]]
+extension = "pl"
+header_offset = 0
+header_magic = "D0 4F 50 53"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Interleaf PrinterLeaf / WorldView document format (now Broadvision QuickSilver)"
+
+[[signature]]
+extension = "nii"
+header_offset = 344
+header_magic = "6E 2B 31 00"
+tail_offset = 0
+min_size = 364
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Single file NIfTI format, used extensively in biomedical imaging."
+
+[[signature]]
+extension = "hl7"
+header_offset = 0
+header_magic = "4D 53 48 7C 42 53 48 7C"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Health Level Seven (HL7) Standard for electronic data exchange"
+
+[[signature]]
+extension = "pwrdata"
+header_offset = 0
+header_magic = "70 77 72 64 61 74 61"
+tail_offset = 0
+min_size = 23
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: SAP Power Monitor (version 1.1.0 and higher) data file"
+
+[[signature]]
+extension = "cnt"
+header_offset = 0
+header_magic = "3A 42 61 73 65 20"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Windows 3.x - Windows 95 Help Contents"
+
+[[signature]]
+extension = "vdr"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 56 44 52 4D"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: VirtualDub"
+
+[[signature]]
+extension = "trd"
+header_offset = 0
+header_magic = "52 59 46 46 ?? ?? ?? ?? 54 52 49 44"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: TrID"
+
+[[signature]]
+extension = "shw"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 73 68 77 34"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Corel SHOW! 4.0"
+
+[[signature]]
+extension = "shr"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 73 68 72 35"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Corel SHOW! 5.0 player"
+
+[[signature]]
+extension = "shb"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 73 68 62 35"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Corel SHOW! 5.0 background"
+
+[[signature]]
+extension = "mmm"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 52 4D 4D 50"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: MacroMind Multimedia Movie or Microsoft Multimedia Movie"
+
+[[signature]]
+extension = "e57"
+header_offset = 0
+header_magic = "41 53 54 4D 2D 45 35 37"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: ASTM E57 3D file format"
+
+# NOTE: the Wikipedia table's "sys / aa aa aa aa" (CrowdStrike channel file)
+# row was deliberately EXCLUDED: a 4 x 0xAA magic matches uninitialized
+# flash and slack space wholesale — a false-positive factory, not a usable
+# carving signature.
+
+[[signature]]
+extension = "ucas"
+header_offset = 0
+header_magic = "8C 0A 00"
+tail_offset = 0
+min_size = 19
+max_size = 0
+weight = 725
+source = "Wikipedia List of file signatures: Unreal Engine Compressed Asset Storage file"
+
+[[signature]]
+extension = "utoc"
+header_offset = 0
+header_magic = "2D 3D 3D 2D 2D 3D 3D 2D 2D 3D 3D 2D 2D 3D 3D 2D"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Unreal Engine Table of Contents file"
+
+[[signature]]
+extension = "p00"
+header_offset = 0
+header_magic = "43 36 34 46 69 6C 65 00"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Commodore 64 binary file (source: *.P00 format for Power64 emulator )"
+
+[[signature]]
+extension = "journal"
+header_offset = 0
+header_magic = "4C 50 4B 53 48 48 52 48"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: journald log file [ 99 ]"
+
+[[signature]]
+extension = "hpapp"
+header_offset = 0
+header_magic = "7C 61 8A B2"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: HP Prime graphing calculator file"
+
+[[signature]]
+extension = "czx"
+header_offset = 0
+header_magic = "43 5A 50 58"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Czip X encrypted archive (v4.x)"
+
+[[signature]]
+extension = "pch"
+header_offset = 0
+header_magic = "43 50 43 48"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Clang pre-compiled header"
+
+[[signature]]
+extension = "glb"
+header_offset = 0
+header_magic = "67 6C 54 46"
+tail_offset = 0
+min_size = 20
+max_size = 0
+weight = 800
+source = "Wikipedia List of file signatures: Binary glTF file [ 101 ]"
+
+[[signature]]
+extension = "heif"
+header_offset = 0
+header_magic = "00 00 00 18 66 74 79 70 68 65 69 63 00 00 00 00"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 950
+source = "Wikipedia List of file signatures: Apple HEIF image file [ 102 ]"
