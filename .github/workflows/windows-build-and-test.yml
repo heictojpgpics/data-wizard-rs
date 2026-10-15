@@ -212,10 +212,34 @@ jobs:
           $exe = Join-Path $loc "dw-tauri.exe"
           if (-not (Test-Path $exe)) { throw "installed exe missing at $exe" }
 
-          # Launch smoke: the app must start and stay up.
-          $app = Start-Process $exe -PassThru
+          # WebView2 runtime: the MSI's silent bootstrapper is not
+          # guaranteed to complete under /qn before we launch, and the
+          # app hard-fails without the runtime. Install it explicitly if
+          # the Evergreen registration is absent.
+          $wv2 = Get-ItemProperty
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A7D48E4A}"
+            -ErrorAction SilentlyContinue
+          if (-not $wv2 -or -not $wv2.PV) {
+            Write-Host "WebView2 runtime not registered; installing webview2-runtime"
+            choco install -y webview2-runtime --no-progress | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "webview2-runtime install failed: $LASTEXITCODE" }
+          } else {
+            Write-Host "WebView2 runtime present: $($wv2.PV)"
+          }
+
+          # Launch smoke: the app must start and stay up. Capture stdout/
+          # stderr so a startup panic is diagnosable from the log alone.
+          $so = "$env:TEMP\app-stdout.txt"
+          $se = "$env:TEMP\app-stderr.txt"
+          $app = Start-Process $exe -PassThru -RedirectStandardOutput $so -RedirectStandardError $se
           Start-Sleep -Seconds 10
-          if ($app.HasExited) { throw "app exited immediately (code $($app.ExitCode))" }
+          if ($app.HasExited) {
+            Write-Host "=== app stdout ==="
+            Get-Content $so -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
+            Write-Host "=== app stderr ==="
+            Get-Content $se -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
+            throw "app exited immediately (code $($app.ExitCode))"
+          }
           Stop-Process -Id $app.Id -Force
           Write-Host "Launch smoke passed"
 
