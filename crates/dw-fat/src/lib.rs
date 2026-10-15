@@ -30,6 +30,7 @@ pub mod direntry;
 pub mod error;
 pub mod fat;
 pub mod plugin;
+pub mod timestamp;
 pub mod walker;
 
 pub use error::{FatError, FatResult};

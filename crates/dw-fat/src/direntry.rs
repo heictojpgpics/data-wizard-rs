@@ -95,10 +95,16 @@ pub struct ShortEntry {
     pub attributes: u8,
     pub first_cluster: u32,
     pub file_size: u32,
+    /// Creation time, 10 ms units (0..=199), from the separate tenths byte.
+    pub creation_time_tenths: u8,
+    /// Creation time (packed FAT time bitfield).
     pub creation_time: u16,
+    /// Creation date (packed FAT date bitfield).
     pub creation_date: u16,
     pub last_access_date: u16,
+    /// Last write (modification) time (packed FAT time bitfield).
     pub last_write_time: u16,
+    /// Last write (modification) date (packed FAT date bitfield).
     pub last_write_date: u16,
     /// True if this entry was deleted (first byte == 0xE5).
     pub is_deleted: bool,
@@ -173,6 +179,7 @@ impl ShortEntry {
             attributes: raw.attributes,
             first_cluster,
             file_size: raw.file_size,
+            creation_time_tenths: raw.creation_time_tenths,
             creation_time: raw.creation_time,
             creation_date: raw.creation_date,
             last_access_date: raw.last_access_date,

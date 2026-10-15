@@ -34,5 +34,5 @@ pub mod scan;
 pub use error::{CoreError, CoreResult};
 pub use plugin::{FsPlugin, FsProbe, ProbeOutcome, ScanMode};
 pub use progress::{ProgressEvent, ProgressPhase, ProgressSink};
-pub use results::{RecoveredEntry, RecoveredEntryId, RecoveryStatus, ResultsStore};
+pub use results::{Extent, RecoveredEntry, RecoveredEntryId, RecoveryStatus, ResultsStore};
 pub use scan::{Scan, ScanConfig, ScanHandle, ScanState};

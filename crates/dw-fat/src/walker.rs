@@ -20,7 +20,7 @@ use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
 use dw_core::{
-    CoreError, CoreResult, ProgressEvent, ProgressPhase, ProgressSink, RecoveredEntry,
+    CoreError, CoreResult, Extent, ProgressEvent, ProgressPhase, ProgressSink, RecoveredEntry,
     RecoveredEntryId, RecoveryStatus, ResultsStore, ScanMode,
 };
 use dw_disk::{DiskSource, ReadAt};
@@ -29,6 +29,7 @@ use crate::bpb::{FatBpb, FatKind};
 use crate::direntry::{DirEntry, END_MARKER, ShortEntry};
 use crate::error::FatError;
 use crate::fat::FatTable;
+use crate::timestamp::{decode_fat_access_date, decode_fat_datetime};
 
 /// Walk the FAT directory tree and append entries to `results`.
 pub async fn walk_fat(
@@ -317,7 +318,37 @@ fn process_short_entry(
         Vec::new()
     };
 
-    let entry = RecoveredEntry {
+    // Translate the FS cluster chain into canonical physical extents:
+    // consecutive clusters merge into one extent; the final extent is
+    // trimmed so the total equals the directory-entry file size. This is
+    // what makes fragmented-file recovery work.
+    //
+    // Unit correctness: `cluster_chain` holds FS cluster numbers (2-based);
+    // `bpb.cluster_to_byte()` maps them to absolute byte offsets in the
+    // volume (data-region offset + (cluster-2) * cluster_size).
+    let offsets: Vec<u64> = cluster_chain
+        .iter()
+        .map(|&c| bpb.cluster_to_byte(u32::try_from(c).unwrap_or(u32::MAX)))
+        .collect();
+    let extents = merge_and_trim_offsets(
+        &offsets,
+        u64::from(bpb.bytes_per_cluster),
+        u64::from(short.file_size),
+    );
+
+    // Honest status: chain shorter than file size -> PartiallyRecovered.
+    let chain_bytes = u64::from(bpb.bytes_per_cluster) * cluster_chain.len() as u64;
+    let status = if short.file_size == 0 || !cluster_chain.is_empty() {
+        if chain_bytes >= u64::from(short.file_size) || short.file_size == 0 {
+            RecoveryStatus::Intact
+        } else {
+            RecoveryStatus::PartiallyRecovered
+        }
+    } else {
+        RecoveryStatus::PartiallyRecovered
+    };
+
+    let mut entry = RecoveredEntry {
         id: RecoveredEntryId(Uuid::now_v7()),
         fs_kind: match bpb.kind {
             FatKind::Fat12 => "fat12".to_string(),
@@ -327,16 +358,24 @@ fn process_short_entry(
         parent_path: dir_path.to_string(),
         name,
         size: u64::from(short.file_size),
-        start_lba: cluster_chain.first().copied(),
-        mtime: None, // TODO: parse FAT timestamps
-        ctime: None,
-        status: RecoveryStatus::Intact,
+        start_lba: None, // recomputed from extents below
+        mtime: decode_fat_datetime(short.last_write_date, short.last_write_time, None),
+        ctime: decode_fat_datetime(
+            short.creation_date,
+            short.creation_time,
+            Some(short.creation_time_tenths),
+        ),
+        atime: decode_fat_access_date(short.last_access_date),
+        status,
         extension,
         mime: None,
         confidence: 1000,
         was_deleted: is_deleted,
         cluster_chain,
+        extents,
+        resident_data: None,
     };
+    entry.recompute_start_lba();
 
     results.insert(entry);
     *entries_emitted += 1;
@@ -359,4 +398,38 @@ fn process_short_entry(
     }
 
     Ok(())
+}
+
+/// Merge a list of ascending byte offsets (each `step` bytes long) into
+/// contiguous extents and trim the total to `file_size`.
+///
+/// Shared by the FAT walker (`bpb.cluster_to_byte` offsets) and the exFAT
+/// walker (`boot.cluster_to_byte` offsets). Consecutive offsets merge into
+/// one extent; the final extent is cut so `sum(length) == file_size` when
+/// the underlying chain covers at least `file_size` bytes; a shorter chain
+/// yields shorter extents (the caller marks the entry PartiallyRecovered).
+pub fn merge_and_trim_offsets(offsets: &[u64], step: u64, file_size: u64) -> Vec<Extent> {
+    let mut extents: Vec<Extent> = Vec::new();
+    let mut remaining = file_size;
+
+    for &off in offsets {
+        if remaining == 0 {
+            break;
+        }
+        let want = step.min(remaining);
+        // Extend the previous extent if contiguous, else push a new one.
+        if let Some(last) = extents.last_mut()
+            && last.start_byte + last.length == off
+        {
+            last.length += want;
+        } else {
+            extents.push(Extent {
+                start_byte: off,
+                length: want,
+            });
+        }
+        remaining -= want;
+    }
+
+    extents
 }

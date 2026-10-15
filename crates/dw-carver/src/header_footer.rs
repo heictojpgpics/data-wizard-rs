@@ -88,12 +88,15 @@ pub fn carve_region(
                 start_lba: Some(m.offset / 512),
                 mtime: None,
                 ctime: None,
+                atime: None,
                 status: RecoveryStatus::Carved,
                 extension: m.extension.clone(),
                 mime: m.mime.clone(),
                 confidence: m.weight,
                 was_deleted: true,
                 cluster_chain: Vec::new(),
+                extents: Vec::new(),
+                resident_data: None,
             };
 
             results.insert(entry);

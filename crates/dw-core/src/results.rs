@@ -13,6 +13,27 @@ use uuid::Uuid;
 #[serde(transparent)]
 pub struct RecoveredEntryId(pub Uuid);
 
+/// A canonical physical extent on the scan source: `start_byte .. start_byte + length`.
+///
+/// Extents are absolute byte offsets into the *scan source* (image file or
+/// raw device). They are the single source of truth for recovery I/O: the
+/// recovery writer walks these extents in order, which handles fragmented
+/// files naturally (FAT chains, NTFS run lists, contiguous carver ranges).
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Extent {
+    /// Absolute byte offset of this extent on the source.
+    pub start_byte: u64,
+    /// Length of this extent in bytes.
+    pub length: u64,
+}
+
+impl Extent {
+    /// Byte range covered by this extent.
+    pub fn range(&self) -> std::ops::Range<u64> {
+        self.start_byte..self.start_byte + self.length
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveredEntry {
     pub id: RecoveredEntryId,
@@ -23,11 +44,16 @@ pub struct RecoveredEntry {
     /// First LBA on the source disk where this entry's data begins.
     /// `None` for entries recovered from carving where the original FS
     /// metadata is gone.
+    ///
+    /// Derived from `extents` when populated (see `recompute_start_lba`).
     pub start_lba: Option<u64>,
     /// Modification time as stored on disk (FS-native).
     pub mtime: Option<OffsetDateTime>,
     /// Creation time as stored on disk.
     pub ctime: Option<OffsetDateTime>,
+    /// Last-access time as stored on disk (FAT has date-only; NTFS/exFAT full).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atime: Option<OffsetDateTime>,
     /// Recovery status -- is the data intact, partially recovered, etc.
     pub status: RecoveryStatus,
     /// Recovered file extension (lowercase, no dot).
@@ -38,8 +64,20 @@ pub struct RecoveredEntry {
     pub confidence: u16,
     /// Whether the entry was deleted from the source filesystem.
     pub was_deleted: bool,
-    /// Original cluster chain (FS-native), if known.
+    /// Original cluster chain (FS-native), if known. Display/diagnostic use;
+    /// recovery I/O uses `extents` instead.
     pub cluster_chain: Vec<u64>,
+    /// Canonical physical extents on the source, in file order. Populated by
+    /// the FS walkers (FAT chain, NTFS run list, exFAT chain/contiguous) and
+    /// by the carver (validated header..footer range). Empty when the
+    /// physical layout is unknown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extents: Vec<Extent>,
+    /// Inline (resident) file content, for filesystems that store small
+    /// files inside metadata (NTFS resident $DATA). Takes priority over
+    /// `extents` during recovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resident_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
@@ -48,7 +86,19 @@ pub enum RecoveryStatus {
     PartiallyRecovered,
     Overwritten,
     Carved,
+    /// Header matched and the format-specific analyser (JPEG EOI / PNG IEND /
+    /// ZIP EOCD walk) confirmed the structure. Highest carver confidence.
+    CarvedValidated,
     PendingValidation,
+}
+
+impl RecoveredEntry {
+    /// Recompute `start_lba` from `extents` (first extent start / 512).
+    /// Call after populating extents so the LBA is physically meaningful
+    /// (FS cluster numbers are NOT LBAs and must not leak into this field).
+    pub fn recompute_start_lba(&mut self) {
+        self.start_lba = self.extents.first().map(|e| e.start_byte / 512);
+    }
 }
 
 /// A bounded, thread-safe store of [`RecoveredEntry`]s.

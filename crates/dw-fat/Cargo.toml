@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 dw-core      = { workspace = true }
 dw-disk      = { workspace = true }
+time         = { workspace = true }
 dw-ipc       = { workspace = true }
 tokio        = { workspace = true }
 async-trait  = { workspace = true }

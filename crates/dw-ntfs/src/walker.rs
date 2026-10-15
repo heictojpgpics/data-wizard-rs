@@ -30,7 +30,7 @@ use tracing::{info, trace, warn};
 use uuid::Uuid;
 
 use dw_core::{
-    CoreError, CoreResult, ProgressEvent, ProgressPhase, ProgressSink, RecoveredEntry,
+    CoreError, CoreResult, Extent, ProgressEvent, ProgressPhase, ProgressSink, RecoveredEntry,
     RecoveredEntryId, RecoveryStatus, ResultsStore, ScanMode,
 };
 use dw_disk::DiskSource;
@@ -38,7 +38,46 @@ use dw_disk::DiskSource;
 use crate::NtfsError;
 use crate::boot::Vbr;
 use crate::filename::{FileName, namespace};
-use crate::mft::{FileRecord, decode_run_list};
+use crate::mft::{DataRun, FileRecord, decode_run_list};
+
+/// Build canonical extents from decoded NTFS data runs.
+///
+/// Each non-sparse run contributes one extent `(lcn * bpc, length * bpc)`.
+/// Consecutive runs merge (already handled by the caller-visible trim):
+/// we keep the trim-total-to-`file_size` rule shared with the FAT/exFAT
+/// walkers. Sparse runs (offset = None) contribute nothing and leave a
+/// coverage gap, which the caller reports as PartiallyRecovered.
+pub fn ntfs_extents_from_runs(
+    runs: &[DataRun],
+    bytes_per_cluster: u64,
+    file_size: u64,
+) -> Vec<Extent> {
+    if bytes_per_cluster == 0 || file_size == 0 {
+        return Vec::new();
+    }
+    let mut extents: Vec<Extent> = Vec::new();
+    let mut remaining = file_size;
+    for run in runs {
+        if remaining == 0 {
+            break;
+        }
+        let Some(lcn) = run.offset else { continue }; // sparse hole
+        let want = (run.length * bytes_per_cluster).min(remaining);
+        let start = lcn * bytes_per_cluster;
+        if let Some(last) = extents.last_mut()
+            && last.start_byte + last.length == start
+        {
+            last.length += want;
+        } else {
+            extents.push(Extent {
+                start_byte: start,
+                length: want,
+            });
+        }
+        remaining -= want;
+    }
+    extents
+}
 
 /// Configuration for the MFT walker.
 #[derive(Debug, Clone)]
@@ -68,11 +107,20 @@ struct CollectedRecord {
     name: String,
     file_size: u64,
     cluster_chain: Vec<u64>,
+    /// Canonical physical extents from the $DATA run list (empty for
+    /// resident data).
+    extents: Vec<dw_core::Extent>,
+    /// Inline resident $DATA content (small files).
+    resident_data: Option<Vec<u8>>,
+    /// True when the run list does not fully cover `file_size`
+    /// (sparse runs / truncated chain).
+    is_partial: bool,
     is_deleted: bool,
     #[allow(dead_code)]
     is_directory: bool,
     mtime: Option<time::OffsetDateTime>,
     ctime: Option<time::OffsetDateTime>,
+    atime: Option<time::OffsetDateTime>,
 }
 
 /// Walk the MFT and append every recoverable entry to `results`.
@@ -218,10 +266,20 @@ pub async fn walk_mft(
             None => continue,
         };
 
-        let (file_size, cluster_chain) = match record.data_attribute() {
+        let (file_size, cluster_chain, extents, resident_data, is_partial) = match record
+            .data_attribute()
+        {
             Some(attr) => match &attr.data {
                 crate::mft::AttributeData::Resident { content } => {
-                    (content.len() as u64, Vec::new())
+                    // Resident $DATA: content is inline in the MFT record.
+                    // Capture it so recovery does not need cluster I/O.
+                    (
+                        content.len() as u64,
+                        Vec::new(),
+                        Vec::new(),
+                        Some(content.clone()),
+                        false,
+                    )
                 }
                 crate::mft::AttributeData::NonResident {
                     run_list,
@@ -230,10 +288,18 @@ pub async fn walk_mft(
                 } => {
                     let runs = decode_run_list(run_list).unwrap_or_default();
                     let chain: Vec<u64> = runs.iter().filter_map(|r| r.offset).collect();
-                    (*real_size, chain)
+                    // Build canonical extents from the run list: each
+                    // non-sparse run contributes (LCN * bpc, length * bpc),
+                    // trimmed in total to `real_size`. Sparse runs (holes)
+                    // leave gaps -> is_partial.
+                    let extents =
+                        ntfs_extents_from_runs(&runs, u64::from(vbr.bytes_per_cluster), *real_size);
+                    let covered: u64 = extents.iter().map(|e| e.length).sum();
+                    let is_partial = covered < *real_size;
+                    (*real_size, chain, extents, None, is_partial)
                 }
             },
-            None => (0, Vec::new()),
+            None => (0, Vec::new(), Vec::new(), None, false),
         };
 
         collected.push(CollectedRecord {
@@ -242,10 +308,14 @@ pub async fn walk_mft(
             name: file_name.name.clone(),
             file_size,
             cluster_chain,
+            extents,
+            resident_data,
+            is_partial,
             is_deleted,
             is_directory: record.is_directory(),
             mtime: file_name.modification_time,
             ctime: file_name.creation_time,
+            atime: file_name.read_time,
         });
 
         records_processed += 1;
@@ -300,22 +370,30 @@ pub async fn walk_mft(
             .map(|(_, ext)| ext.to_lowercase())
             .unwrap_or_default();
 
-        let entry = RecoveredEntry {
+        let mut entry = RecoveredEntry {
             id: RecoveredEntryId(Uuid::now_v7()),
             fs_kind: "ntfs".to_string(),
             parent_path,
             name: r.name.clone(),
             size: r.file_size,
-            start_lba: r.cluster_chain.first().copied(),
+            start_lba: None, // recomputed from extents below
             mtime: r.mtime,
             ctime: r.ctime,
-            status: RecoveryStatus::Intact,
+            atime: r.atime,
+            status: if r.is_partial {
+                RecoveryStatus::PartiallyRecovered
+            } else {
+                RecoveryStatus::Intact
+            },
             extension,
             mime: None,
             confidence: 1000,
             was_deleted: r.is_deleted,
             cluster_chain: r.cluster_chain.clone(),
+            extents: r.extents.clone(),
+            resident_data: r.resident_data.clone(),
         };
+        entry.recompute_start_lba();
 
         results.insert(entry);
         entries_emitted += 1;
