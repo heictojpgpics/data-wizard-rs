@@ -47,6 +47,12 @@ impl ProgressSink for PrintSink {
 
 #[tokio::main]
 async fn main() {
+    use tracing_subscriber::EnvFilter;
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
         eprintln!("usage: scan_volume <source> [--deep] [--partitions] [--partition N]");
@@ -82,13 +88,9 @@ async fn main() {
             dw_disk::DiscoveredTable::Gpt { entries, .. } => {
                 println!("table: gpt, {} partitions", entries.len());
                 for e in entries {
-                    let fs = PartitionView::new(
-                        file_source.as_read_at(),
-                        e.offset_bytes,
-                        e.size_bytes,
-                    )
-                    .ok()
-                    .and_then(|view| probe_fs(&view).await);
+                    let fs =
+                        probe_fs_partition(&file_source.as_read_at(), e.offset_bytes, e.size_bytes)
+                            .await;
                     println!(
                         "  #{} @{:<10} size={:<12} type={:<22} label={:?} fs={:?}",
                         e.index, e.offset_bytes, e.size_bytes, e.type_name, e.label, fs
@@ -98,13 +100,9 @@ async fn main() {
             dw_disk::DiscoveredTable::Mbr { entries } => {
                 println!("table: mbr, {} partitions", entries.len());
                 for e in entries {
-                    let fs = PartitionView::new(
-                        file_source.as_read_at(),
-                        e.offset_bytes,
-                        e.size_bytes,
-                    )
-                    .ok()
-                    .and_then(|view| probe_fs(&view).await);
+                    let fs =
+                        probe_fs_partition(&file_source.as_read_at(), e.offset_bytes, e.size_bytes)
+                            .await;
                     println!(
                         "  #{} @{:<10} size={:<12} scheme={:<6} type={:<22} fs={:?}",
                         e.index, e.offset_bytes, e.size_bytes, e.scheme, e.type_name, fs
@@ -119,14 +117,13 @@ async fn main() {
     // ---- Source selection (whole volume or one partition) ----
     let source: Arc<dyn DiskSource> = match partition {
         Some(index) => {
-            let table =
-                match dw_disk::discover_partitions(file_source.as_read_at().as_ref()) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        eprintln!("partition discovery error: {e}");
-                        std::process::exit(1);
-                    }
-                };
+            let table = match dw_disk::discover_partitions(file_source.as_read_at().as_ref()) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("partition discovery error: {e}");
+                    std::process::exit(1);
+                }
+            };
             let entries = match &table {
                 dw_disk::DiscoveredTable::Gpt { entries, .. } => entries,
                 dw_disk::DiscoveredTable::Mbr { entries } => entries,
@@ -155,8 +152,15 @@ async fn main() {
     };
 
     // ---- Probe ----
-    let mode = if deep { ScanMode::Deep } else { ScanMode::Quick };
-    println!("source: {source_path} ({} bytes)", source.as_read_at().size());
+    let mode = if deep {
+        ScanMode::Deep
+    } else {
+        ScanMode::Quick
+    };
+    println!(
+        "source: {source_path} ({} bytes)",
+        source.as_read_at().size()
+    );
     println!("mode:   {:?}", mode);
     if let Some(fs) = probe_fs(source.as_ref()).await {
         println!("fs:     {fs}");
@@ -170,7 +174,9 @@ async fn main() {
     let plugins = all_plugins();
     let matched = probe_plugin(&plugins, source.as_ref()).await;
     let Some(plugin) = matched else {
-        eprintln!("no plugin claimed the source; nothing to scan (try --deep for raw carving via the app)");
+        eprintln!(
+            "no plugin claimed the source; nothing to scan (try --deep for raw carving via the app)"
+        );
         return;
     };
     println!("engine: {}", plugin.name());
@@ -215,13 +221,22 @@ async fn main() {
     }
 }
 
-async fn probe_fs(view: &PartitionView) -> Option<String> {
+async fn probe_fs(view: &dyn DiskSource) -> Option<String> {
     for plugin in all_plugins() {
         if let Ok(ProbeOutcome::Yes(probe)) = plugin.probe(view).await {
             return Some(probe.fs_kind);
         }
     }
     None
+}
+
+async fn probe_fs_partition(
+    read: &std::sync::Arc<dyn dw_disk::ReadAt>,
+    off: u64,
+    size: u64,
+) -> Option<String> {
+    let view = PartitionView::new(std::sync::Arc::clone(read), off, size).ok()?;
+    probe_fs(&view).await
 }
 
 async fn probe_plugin(
@@ -235,4 +250,3 @@ async fn probe_plugin(
     }
     None
 }
-

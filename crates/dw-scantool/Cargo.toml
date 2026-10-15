@@ -1,0 +1,36 @@
+[package]
+name = "dw-scantool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Standalone volume scanner (probe all engines, run the matching one, list partitions)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "dw-scan"
+path = "src/main.rs"
+
+[dependencies]
+dw-core      = { workspace = true }
+dw-disk       = { workspace = true }
+dw-ntfs      = { workspace = true }
+dw-fat       = { workspace = true }
+dw-exfat     = { workspace = true }
+dw-ext       = { workspace = true }
+dw-hfs       = { workspace = true }
+dw-btrfs     = { workspace = true }
+dw-refs      = { workspace = true }
+dw-zfs       = { workspace = true }
+dw-signatures = { workspace = true }
+dw-carver     = { workspace = true }
+tokio        = { workspace = true }
+async-trait  = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27"

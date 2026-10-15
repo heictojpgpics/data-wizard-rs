@@ -14,4 +14,6 @@ pub enum HfsError {
     OutOfRange { offset: u64, len: u64 },
     #[error("not yet implemented: {0}")]
     Todo(&'static str),
+    #[error("not an HFS+ volume")]
+    NotHfsPlus,
 }

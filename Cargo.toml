@@ -14,6 +14,7 @@ members = [
     "crates/dw-signatures",
     "crates/dw-carver",
     "crates/dw-ipc",
+    "crates/dw-scantool",
     # `src-tauri` is excluded from the default workspace because it pulls in
     # the full Tauri 2 dependency tree (which differs between Linux and
     # Windows). It's built explicitly by CI on Windows runners.
@@ -141,9 +142,9 @@ tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
-specta = "=2.0.0-rc.22"
+specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"
-tauri-specta = { version = "=2.0.0-rc.24", features = ["derive", "typescript"] }
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 
 [profile.release]
 opt-level = 3

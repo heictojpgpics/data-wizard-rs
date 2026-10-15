@@ -29,6 +29,7 @@ pub mod error;
 pub mod extents;
 pub mod plugin;
 pub mod volumeheader;
+pub mod walker;
 
 pub use error::{HfsError, HfsResult};
 pub use plugin::HfsPlugin;
