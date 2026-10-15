@@ -52,7 +52,9 @@ pub struct RecoveredEntry {
     /// Creation time as stored on disk.
     pub ctime: Option<OffsetDateTime>,
     /// Last-access time as stored on disk (FAT has date-only; NTFS/exFAT full).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// NOTE: no `skip_serializing_if` here — postcard checkpoints are a
+    /// positional format; a skipped field desynchronizes the reader.
+    #[serde(default)]
     pub atime: Option<OffsetDateTime>,
     /// Recovery status -- is the data intact, partially recovered, etc.
     pub status: RecoveryStatus,
@@ -71,12 +73,14 @@ pub struct RecoveredEntry {
     /// the FS walkers (FAT chain, NTFS run list, exFAT chain/contiguous) and
     /// by the carver (validated header..footer range). Empty when the
     /// physical layout is unknown.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// (No `skip_serializing_if`: positional serialization formats
+    /// (postcard checkpoints) cannot signal an absent field.)
+    #[serde(default)]
     pub extents: Vec<Extent>,
     /// Inline (resident) file content, for filesystems that store small
     /// files inside metadata (NTFS resident $DATA). Takes priority over
     /// `extents` during recovery.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub resident_data: Option<Vec<u8>>,
 }
 
@@ -167,6 +171,25 @@ impl ResultsStore {
 
     pub fn snapshot(&self) -> Vec<RecoveredEntry> {
         self.inner.read().entries.values().cloned().collect()
+    }
+
+    /// Collapse duplicate entries, keeping the LATEST occurrence per
+    /// (parent path, name) — `by_path` already holds the latest id per
+    /// path because `insert` overwrites it. The latest pass has the most
+    /// complete extents/timestamps, so it wins.
+    ///
+    /// Used after a resumed scan re-runs the plugin pass over restored
+    /// entries: identical findings appear twice (once restored, once
+    /// re-walked). Returns the number of removed entries.
+    pub fn dedup_by_identity(&self) -> usize {
+        let mut g = self.inner.write();
+        let before = g.entries.len();
+        // Keep set = latest ids per path (from by_path).
+        let keep: std::collections::HashSet<RecoveredEntryId> =
+            g.by_path.values().copied().collect();
+        g.entries.retain(|id, _| keep.contains(id));
+        g.by_path.retain(|_, id| keep.contains(id));
+        before - g.entries.len()
     }
 
     pub fn spilled_count(&self) -> usize {

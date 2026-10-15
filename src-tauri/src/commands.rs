@@ -20,6 +20,19 @@ use dw_ipc::commands::*;
 
 use crate::state::{AppState, ScanRecord};
 
+/// Resolve the on-disk checkpoint directory (app data dir / checkpoints).
+fn checkpoint_dir(state: &State<'_, Arc<RwLock<AppState>>>) -> PathBuf {
+    use tauri::Manager;
+    let app = state.read().app.clone();
+    let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("checkpoints");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
 /// All registered filesystem plugins (shared by start_scan and
 /// list_partitions probing).
 fn all_plugins() -> Vec<Arc<dyn dw_core::FsPlugin>> {
@@ -134,11 +147,53 @@ pub async fn start_scan(
     }
 
     let state_clone = Arc::clone(state.inner());
+    let mode = cfg.mode;
     tokio::spawn(async move {
         info!(scan_id = %scan_id, "Scan task started");
         let result = scan.run().await;
         match &result {
-            Ok(()) => info!(scan_id = %scan_id, "Scan task completed"),
+            Ok(outcome) => {
+                // No plugin recognized the source: run the raw-carving
+                // fallback here in the app layer (dw-core stays free of
+                // dw-carver; layering: carver depends on core).
+                let mut carved_fallback: Option<u64> = None;
+                if outcome.plugin_id.is_none() && matches!(mode, dw_core::plugin::ScanMode::Deep) {
+                    if let Some(record) = state_clone.read().scans.get(&scan_id) {
+                        let source_path = match parse_source_uri(&record.source_uri) {
+                            Ok(p) => p,
+                            Err(_) => return,
+                        };
+                        if let Ok(src) = FileBackedSource::open(&source_path) {
+                            let size = src.size();
+                            let db = dw_signatures::SignatureDb::from_embedded();
+                            let read_at = src.as_read_at();
+                            let results = record.handle.results();
+                            let progress = record.progress_sink(
+                                &(state_clone.read().app.clone()),
+                            );
+                            warn!(scan_id = %scan_id, size, "Raw-carving fallback (unknown filesystem)");
+                            carved_fallback = dw_carver::header_footer::carve_region_async(
+                                read_at,
+                                0,
+                                size,
+                                std::sync::Arc::new(db),
+                                results,
+                                progress,
+                                scan_id,
+                                1 << 20,
+                            )
+                            .await
+                            .ok();
+                        }
+                    }
+                }
+                info!(
+                    scan_id = %scan_id,
+                    entries = outcome.entries,
+                    raw_carved = carved_fallback.unwrap_or(0),
+                    "Scan task completed"
+                );
+            }
             Err(e) => {
                 warn!(scan_id = %scan_id, error = %e, "Scan task failed");
                 let g = state_clone.read();
@@ -357,6 +412,150 @@ fn parse_source_uri(uri: &str) -> Result<PathBuf, String> {
     } else {
         Err(format!("unsupported source URI: {uri}"))
     }
+}
+
+#[tauri::command]
+pub async fn save_scan(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    req: SaveScanRequest,
+) -> Result<SaveScanResponse, String> {
+    let id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
+    info!(scan_id = %id, "save_scan");
+
+    let g = state.read();
+    let record = g.scans.get(&id).ok_or_else(|| "scan not found".to_string())?;
+    let source_uri = record.source_uri.clone();
+    drop(g);
+
+    // Re-open the source for fingerprinting (read-only).
+    let path = parse_source_uri(&source_uri)?;
+    let source = FileBackedSource::open(&path).map_err(|e| format!("open source: {e}"))?;
+
+    let g = state.read();
+    let record = g.scans.get(&id).ok_or_else(|| "scan not found".to_string())?;
+    let store = dw_core::CheckpointStore::new(checkpoint_dir(&state));
+    let entries = record.handle.results().len() as u64;
+    store
+        .save(&record.handle, &source_uri, source.as_read_at().as_ref())
+        .map_err(|e| e.to_string())?;
+    Ok(SaveScanResponse { saved: true, entries })
+}
+
+#[tauri::command]
+pub async fn list_saved_scans(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    _req: ListSavedScansRequest,
+) -> Result<ListSavedScansResponse, String> {
+    let store = dw_core::CheckpointStore::new(checkpoint_dir(&state));
+    let scans = store
+        .list()
+        .into_iter()
+        .map(|s| SavedScanSummary {
+            scan_id: s.scan_id.to_string(),
+            source_uri: s.source_uri,
+            created_at: s.created_at.to_string(),
+            mode: s.mode,
+            state: format!("{:?}", s.state),
+            entries: s.entries,
+        })
+        .collect();
+    Ok(ListSavedScansResponse { scans })
+}
+
+#[tauri::command]
+pub async fn resume_scan(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    req: ResumeScanRequest,
+) -> Result<ResumeScanResponse, String> {
+    let id = uuid::Uuid::parse_str(&req.saved_scan_id).map_err(|e| e.to_string())?;
+    info!(saved_scan_id = %id, deep = req.deep, "resume_scan");
+
+    // Load + verify against the current source.
+    let store = dw_core::CheckpointStore::new(checkpoint_dir(&state));
+    let cp = store.load(id).map_err(|e| e.to_string())?;
+    let path = parse_source_uri(&cp.source_uri)?;
+    let source = Arc::new(
+        FileBackedSource::open(&path).map_err(|e| format!("open source: {e}"))?,
+    ) as Arc<dyn DiskSource>;
+    dw_core::verify_source_matches(&cp, source.as_read_at().as_ref())
+        .map_err(|e| format!("refusing to resume: {e}"))?;
+
+    // Continue with the requested mode.
+    let mut config = cp.config.clone();
+    config.mode = if req.deep {
+        dw_core::plugin::ScanMode::Deep
+    } else {
+        dw_core::plugin::ScanMode::Quick
+    };
+    config.include_carving = req.deep;
+
+    let handle = dw_core::checkpoint::restore_handle(dw_core::ScanCheckpoint {
+        config: config.clone(),
+        ..cp
+    });
+    let scan_id = handle.id();
+    // Resume always re-runs the plugin pass over the restored entries;
+    // identical findings replace their older twins at the end.
+    handle.set_state(dw_core::ScanState::Created);
+    let record = ScanRecord::new(handle.clone(), source_uri_of(&config));
+
+    let plugins = all_plugins();
+    let app = {
+        let g = state.read();
+        g.app.clone()
+    };
+    let progress = record.progress_sink(&app);
+    let scan = dw_core::Scan::new(handle.clone(), source, plugins, progress);
+
+    {
+        let mut g = state.write();
+        g.scans.insert(scan_id, record);
+    }
+
+    let state_clone = Arc::clone(state.inner());
+    let mode = config.mode;
+    tokio::spawn(async move {
+        info!(scan_id = %scan_id, "Resumed scan task started");
+        let result = scan.run().await;
+        if result.is_ok() {
+            // Dedup: the re-run duplicates the restored entries.
+            let g = state_clone.read();
+            if let Some(record) = g.scans.get(&scan_id) {
+                let before = record.handle.results().len();
+                record.handle.results().dedup_by_identity();
+                let after = record.handle.results().len();
+                info!(scan_id = %scan_id, before, after, "Resumed scan deduped");
+            }
+        } else {
+            warn!(scan_id = %scan_id, "Resumed scan failed");
+            let g = state_clone.read();
+            if let Some(record) = g.scans.get(&scan_id) {
+                if record.handle.state() != dw_core::ScanState::Cancelled {
+                    record.handle.set_state(dw_core::ScanState::Failed);
+                }
+            }
+        }
+        let _ = mode;
+    });
+
+    Ok(ResumeScanResponse {
+        scan_id: scan_id.to_string(),
+    })
+}
+
+fn source_uri_of(config: &dw_core::ScanConfig) -> String {
+    config.source_uri.clone()
+}
+
+#[tauri::command]
+pub async fn delete_saved_scan(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    req: DeleteSavedScanRequest,
+) -> Result<DeleteSavedScanResponse, String> {
+    let id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
+    let store = dw_core::CheckpointStore::new(checkpoint_dir(&state));
+    store.delete(id).map_err(|e| e.to_string())?;
+    Ok(DeleteSavedScanResponse { deleted: true })
 }
 
 #[tauri::command]

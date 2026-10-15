@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+pub mod checkpoint;
 pub mod error;
 pub mod extents;
 pub mod fat_timestamp;
@@ -34,6 +35,9 @@ pub mod recovery;
 pub mod results;
 pub mod scan;
 
+pub use checkpoint::{
+    CHECKPOINT_VERSION, CheckpointStore, CheckpointSummary, ScanCheckpoint, verify_source_matches,
+};
 pub use error::{CoreError, CoreResult};
 pub use extents::merge_and_trim_offsets;
 pub use fat_timestamp::{decode_fat_access_date, decode_fat_datetime};
@@ -41,4 +45,4 @@ pub use plugin::{FsPlugin, FsProbe, ProbeOutcome, ScanMode};
 pub use progress::{ProgressEvent, ProgressPhase, ProgressSink};
 pub use recovery::{RecoveryError, recover_entry_to_path};
 pub use results::{Extent, RecoveredEntry, RecoveredEntryId, RecoveryStatus, ResultsStore};
-pub use scan::{Scan, ScanConfig, ScanHandle, ScanState};
+pub use scan::{Scan, ScanConfig, ScanHandle, ScanOutcome, ScanState};

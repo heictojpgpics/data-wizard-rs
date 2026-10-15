@@ -94,3 +94,26 @@ export interface StartScanArgs {
   file_filter: string[];
   partition?: number | null;
 }
+
+// Scan resume / checkpoint commands.
+
+export interface SaveScanRequest { scan_id: string; }
+export interface SaveScanResponse { saved: boolean; entries: number; }
+
+export interface SavedScanSummary {
+  scan_id: string;
+  source_uri: string;
+  created_at: string;
+  mode: "quick" | "deep";
+  state: string;
+  entries: number;
+}
+
+export interface ListSavedScansRequest {}
+export interface ListSavedScansResponse { scans: SavedScanSummary[]; }
+
+export interface ResumeScanRequest { saved_scan_id: string; deep: boolean; }
+export interface ResumeScanResponse { scan_id: string; }
+
+export interface DeleteSavedScanRequest { scan_id: string; }
+export interface DeleteSavedScanResponse { deleted: boolean; }

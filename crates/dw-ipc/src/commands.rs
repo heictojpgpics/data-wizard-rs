@@ -92,3 +92,58 @@ pub struct RecoverFilesResponse {
     pub failed: u32,
     pub errors: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SaveScanRequest {
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SaveScanResponse {
+    pub saved: bool,
+    pub entries: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SavedScanSummary {
+    pub scan_id: String,
+    pub source_uri: String,
+    pub created_at: String,
+    /// "quick" | "deep"
+    pub mode: String,
+    pub state: String,
+    pub entries: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ListSavedScansRequest {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ListSavedScansResponse {
+    pub scans: Vec<SavedScanSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ResumeScanRequest {
+    /// The scan_id of a saved checkpoint.
+    pub saved_scan_id: String,
+    /// Continue with a deep pass?
+    pub deep: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ResumeScanResponse {
+    /// The scan_id of the NEW running scan (seeded with the checkpoint's
+    /// results).
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct DeleteSavedScanRequest {
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct DeleteSavedScanResponse {
+    pub deleted: bool,
+}

@@ -77,6 +77,31 @@ impl ScanHandle {
         Arc::clone(&self.inner.results)
     }
 
+    /// Restore a handle from a checkpoint: preserves the scan id, config
+    /// and lifecycle state, and pre-seeds the results store with the
+    /// checkpointed entries (so recovery works after resume without
+    /// rescanning, and so the UI shows the prior findings immediately).
+    pub fn restore(
+        id: Uuid,
+        config: ScanConfig,
+        state: ScanState,
+        entries: Vec<crate::results::RecoveredEntry>,
+    ) -> Arc<Self> {
+        let capacity = config.max_results.max(10_000).max(entries.len() + 10_000);
+        let results = ResultsStore::new(capacity, None);
+        for entry in entries {
+            results.insert(entry);
+        }
+        Arc::new(Self {
+            inner: Arc::new(ScanInner {
+                id,
+                config: RwLock::new(config),
+                state: RwLock::new(state),
+                results,
+            }),
+        })
+    }
+
     pub fn set_state(&self, state: ScanState) {
         *self.inner.state.write() = state;
     }
@@ -122,7 +147,7 @@ impl Scan {
     ///
     /// If no plugin claims the source, we fall back to raw carving
     /// (TODO — not yet implemented).
-    pub async fn run(self) -> CoreResult<()> {
+    pub async fn run(self) -> CoreResult<ScanOutcome> {
         let mode = self.handle.config().mode;
 
         // ---- Phase 1: Probing ----
@@ -154,11 +179,16 @@ impl Scan {
         }
 
         let Some(plugin) = matched_plugin else {
-            // No plugin claimed the source — fall back to raw carving.
-            // TODO: implement raw carving fallback via dw-carver.
-            warn!("No plugin claimed the source; raw carving not yet implemented");
+            // No plugin claimed the source. The app layer decides whether
+            // to run the raw-carving fallback (the role the reference
+            // product assigns to RAWSearchDLL); dw-core stays free of
+            // dw-carver (dependency layering: carver depends on core).
+            warn!("No plugin claimed the source");
             self.handle.set_state(ScanState::Done);
-            return Ok(());
+            return Ok(ScanOutcome {
+                plugin_id: None,
+                entries: 0,
+            });
         };
 
         // Check for cancellation before starting the scan
@@ -190,11 +220,15 @@ impl Scan {
 
         match result {
             Ok(()) => {
+                let entries = self.handle.results().len() as u64;
                 self.handle.set_state(ScanState::Finalizing);
                 self.handle.set_state(ScanState::Done);
                 self.progress.done().await;
-                info!(scan_id = %self.handle.id(), "Scan completed successfully");
-                Ok(())
+                info!(scan_id = %self.handle.id(), entries, "Scan completed successfully");
+                Ok(ScanOutcome {
+                    plugin_id: Some(plugin.id()),
+                    entries,
+                })
             }
             Err(e) => {
                 self.handle.set_state(ScanState::Failed);
@@ -203,6 +237,17 @@ impl Scan {
             }
         }
     }
+}
+
+/// What `Scan::run` accomplished.
+#[derive(Debug, Clone)]
+pub struct ScanOutcome {
+    /// The plugin that claimed the source, or None when no plugin
+    /// recognized it (the app layer may then run the raw-carving
+    /// fallback for deep scans).
+    pub plugin_id: Option<&'static str>,
+    /// Entries in the results store when the scan finished.
+    pub entries: u64,
 }
 
 impl ScanConfig {
