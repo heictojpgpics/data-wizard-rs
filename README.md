@@ -19,14 +19,20 @@ See [`worklog.md`](./worklog.md) for the running work log and [`docs/`](./docs/)
 | exFAT | entry-set walk, timestamps, fragmentation | allocation-bitmap carve | **Working, tested** |
 | HFS+ | catalog B-tree walk, extents | free-block carve | **Working, tested** |
 | ext2/3/4 | live walk + shadow-dirent deleted names (extent trees and indirect maps, fragmented files in content order) | orphan-inode pass + free-block carve | **Working, tested** |
+| Btrfs | live subvolume walks (checksummed nodes, non-identity chunk mapping, fragmented order, inline files) | orphan-tree-block pass (old COW generations surface with names and extents) | **Working, tested** |
 | Unknown/blank | - | raw carve fallback (258 signatures, tiered validation) | **Working, tested** |
 
-Nothing else is claimed. Btrfs, ReFS and ZFS are **not implemented**:
-the reference product does ship real engines for them (verified during
+Nothing else is claimed. ReFS and ZFS are **not implemented**: the
+reference product does ship real engines for them (verified during
 clean-room RE - see `open-recovery-wizard/docs/08-driver-and-module-re.md`),
 and ours will land the same way, one at a time, each validated against
 fixtures and real volumes before the matrix changes. Until then there
 is no stub crate to find: absent means absent.
+
+Btrfs scope, stated honestly: single-device, non-RAID volumes with
+crc32c-verified structures; compressed extents surface as metadata
+only (decompression is not in v1); multi-device/RAID falls back to raw
+carving with the reason recorded, never a half-parse.
 
 ext4 journal-based deleted-dirent recovery (jbd2) is likewise a
 documented roadmap item, not a present feature.
@@ -70,6 +76,7 @@ data-wizard-rs/
 │   ├── dw-exfat/        # exFAT parser (FAT + directory bitmap + stream extensions)
 │   ├── dw-ext/          # ext2/3/4 parser (group descriptors + inode tables + extents)
 │   ├── dw-hfs/          # HFS+ parser (B-tree catalog + extents overflow)
+│   ├── dw-btrfs/        # Btrfs parser (checksummed b-trees + chunk mapping + COW orphan pass)
 │   ├── dw-signatures/   # file signature DB (rebuilt from public sources — NOT extracted)
 │   ├── dw-carver/       # raw file carving engine (header/footer + bifragment gap)
 │   └── dw-ipc/          # types shared between Rust core and Tauri/React

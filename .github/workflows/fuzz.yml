@@ -48,6 +48,10 @@ jobs:
             target: fuzz_catalog_record
           - crate: dw-hfs
             target: fuzz_volume_header
+          - crate: dw-btrfs
+            target: fuzz_superblock
+          - crate: dw-btrfs
+            target: fuzz_items
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@nightly
