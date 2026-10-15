@@ -140,3 +140,50 @@ The carver parallelises across:
 
 The `ResultsStore` is the synchronisation point — it's `Arc<ResultsStore>`
 with internal locking via `parking_lot::RwLock`.
+
+
+---
+
+## Implemented design (dw-carver, 2026-10)
+
+### Signature database (258 formats)
+
+`dw-signatures`: three TOML files compiled into the binary at build time
+(no runtime file dependency). Sources, cited per entry: GCF (Kessler),
+Wikipedia List of file signatures (fetched + parsed from the live table),
+NIST DFXML, libmagic. Wildcard bytes (`??`) supported in all patterns.
+
+### Per-format structure analysers (`analysers.rs`)
+
+Written from public format specifications, each with unit tests:
+
+- **JPEG** (T.81): marker walk from SOI; every segment length validated;
+  on SOS, the entropy scan takes the FIRST `FF D9` - entropy data cannot
+  contain a raw FF D9 (FF is escaped as FF 00 or is a marker).
+- **PNG** (ISO 15948): chunk walk; first chunk must be IHDR; IEND must
+  have length 0; ends after the IEND CRC.
+- **ZIP** (PKWARE APPNOTE): first EOCD (`50 4B 05 06`); the comment
+  length field extends the end.
+
+### Four-tier resolution (per candidate)
+
+| Tier | Condition | Result |
+|---|---|---|
+| 1 | analyser validates the structure to the true end | `CarvedValidated`, exact extents, directly recoverable |
+| 2 | structure plausible but end beyond the analysis cap (64 MiB or the signature's max_size) | `Carved`, extents capped - honest partial |
+| 3 | footer signature found forward-scan (GIF `3B`, PDF `%%EOF`, ...; wildcard patterns, window overlap) | `Carved`, extents header..footer |
+| 4 | no analyser, no footer | size-0 marker entry, halved confidence; recovery REFUSES it (typed error) - never writes guessed bytes |
+
+Structurally INVALID candidates emit NOTHING - that is the false-positive
+filter. Candidates at the same offset are deduplicated (highest weight
+wins, alphabetical tiebreak; a ZIP archive matches zip/jar/apk
+signatures simultaneously).
+
+### Where carving runs
+
+- FAT deep scan: `FatTable::free_runs` (raw FAT entry == 0).
+- exFAT deep scan: `ExfatBitmap::free_runs` (allocation bitmap).
+- NTFS deep scan: currently whole-volume (refining to $Bitmap-guided is
+  planned work).
+- Unknown filesystem: the app layer runs the whole-source fallback for
+  deep scans (RAWSearchDLL's role).

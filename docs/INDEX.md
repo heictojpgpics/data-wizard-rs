@@ -38,11 +38,13 @@ the design of `data-wizard-rs`.
 | [`architecture/fs-parser-pattern.md`](architecture/fs-parser-pattern.md) | The per-filesystem plugin pattern (the cleanest idea we borrowed) |
 | [`architecture/licensing-boundary.md`](architecture/licensing-boundary.md) | What's paywalled in the reference product (publicly visible only) and how our OSS version handles it |
 | [`algorithms/scan-phases.md`](algorithms/scan-phases.md) | Probe -> Quick -> Deep -> Finalize lifecycle |
-| [`algorithms/ntfs-recovery.md`](algorithms/ntfs-recovery.md) | NTFS MFT walk + USN journal + carving |
-| [`algorithms/fat-recovery.md`](algorithms/fat-recovery.md) | FAT12/16/32 directory walk + FAT chain recovery |
-| [`algorithms/exfat-recovery.md`](algorithms/exfat-recovery.md) | exFAT bitmap + stream extensions |
-| [`algorithms/ext-recovery.md`](algorithms/ext-recovery.md) | ext2/3/4 inode table + extents + journal |
-| [`algorithms/carving.md`](algorithms/carving.md) | Header/footer, bifragment gap, structured carving |
+| [`algorithms/extents.md`](algorithms/extents.md) | Canonical physical extents: the recovery I/O model shared by all engines |
+| [`algorithms/ntfs-recovery.md`](algorithms/ntfs-recovery.md) | NTFS MFT walk + USN fixup + run lists -> extents + resident $DATA |
+| [`algorithms/fat-recovery.md`](algorithms/fat-recovery.md) | FAT12/16/32 walk + timestamps + free-run carving |
+| [`algorithms/exfat-recovery.md`](algorithms/exfat-recovery.md) | exFAT engine: entry sets, NoFatChain vs FAT chains, bitmap |
+| [`algorithms/carving.md`](algorithms/carving.md) | Signature carving + per-format analysers + the 4-tier policy |
+| [`algorithms/partition-discovery.md`](algorithms/partition-discovery.md) | MBR / EBR chains / CRC32-validated GPT + PartitionView |
+| [`algorithms/resume.md`](algorithms/resume.md) | Checkpoints, 5-point BLAKE3 fingerprints, resume policy |
 | [`formats/filefilter-xml.md`](formats/filefilter-xml.md) | FileFilter.xml schema (format only — our data is rebuilt) |
 | [`formats/raw-signs-json.md`](formats/raw-signs-json.md) | raw_signs.json schema (format only — our data is rebuilt) |
 | [`formats/petools-xml.md`](formats/petools-xml.md) | PEtools.xml schema (WinPE boot setup) |
