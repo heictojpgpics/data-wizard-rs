@@ -144,3 +144,59 @@ Next steps (Task 3+):
 - Implement disk enumeration (Windows physical drives + volumes) in dw-tauri list_disks command
 - Wire up scan progress events (Tauri events from Rust core)
 - Build first end-to-end smoke test on Windows CI
+
+---
+Task ID: 3
+Agent: main
+Task: Implement NTFS VBR parser, FAT BPB parser, write format/UI docs, push CI repo, set up verification workflows
+
+Work Log:
+- Implemented NTFS Volume Boot Record (VBR) parser in crates/dw-ntfs/src/boot.rs
+  - VbrRaw (repr(C, packed) Pod) for zero-copy reinterpretation
+  - Validates OEM ID, bytes_per_sector, sectors_per_cluster, boot signature, MFT record size encoding
+  - 8 unit tests, all passing
+  - Fixed struct layout bug: added missing total_sectors_32 field at offset 32
+- Wired NtfsPlugin::probe() to read sector 0, parse VBR, return ProbeOutcome::Yes with fs metadata
+- Implemented FAT12/16/32 BIOS Parameter Block (BPB) parser in crates/dw-fat/src/bpb.rs
+  - Implements FAT type decision tree from Microsoft FAT spec (< 4085 clusters = FAT12, < 65525 = FAT16, else FAT32)
+  - BpbShared (Pod) for shared BPB, BpbExtFat32 for FAT32 extended fields
+  - Offset helpers: fat_offset_bytes, root_dir_offset_bytes, first_data_offset_bytes, cluster_to_byte
+  - 6 unit tests, all passing
+- Wired FatPlugin::probe() to parse BPB and return ProbeOutcome with fs_kind 'fat12'/'fat16'/'fat32'
+- Total workspace tests: 14 passing (8 NTFS + 6 FAT)
+- Clippy clean with -D warnings, cargo fmt clean
+- Created data-wizard-ci repo with 5 workflows:
+  - build-and-test.yml: clone + build + test + upload artifacts (Windows 2022)
+  - security-scan.yml: cargo audit + npm audit + winchecksec (verifies ASLR/DEP/CFG)
+  - verification.yml: nightly NTFS round-trip test (create VHD, copy files, delete, scan)
+  - benchmarks.yml: nightly criterion benchmarks
+  - fuzz.yml: nightly cargo-fuzz on 8 parser targets
+- Wrote format documentation (docs/formats/):
+  - filefilter-xml.md: FileFilter.xml schema (format only, we rebuild in TOML)
+  - raw-signs-json.md: raw_signs.json schema (format only, we rebuild from public sources)
+  - petools-xml.md: PEtools.xml schema (WinPE bootstrap, out of scope for v0.1)
+  - signatures-bin.md: our signatures.bin v1 binary format spec
+- Wrote UI/UX documentation (docs/ui-ux/):
+  - patterns.md: information architecture (NOT pixel clones), 7 design principles
+  - flows.md: 5 user flows + 3 anti-flows we explicitly do NOT do
+- Pushed 4 commits to data-wizard-rs main:
+  - 573966e: initial scaffold
+  - 78a2d53: NTFS VBR parser
+  - 8517599: FAT BPB parser
+  - 03706b2: format + UI/UX docs
+- Pushed 1 commit to data-wizard-ci main (initial CI workflows)
+
+Stage Summary:
+- 2 FS parsers implemented (NTFS VBR + FAT BPB) with 14 passing unit tests
+- 16 documentation artifacts written and cross-linked
+- Both GitHub repos live with CI configured
+- Workspace compiles cleanly, clippy clean with -D warnings
+- Ready for next milestone: NTFS MFT walker (the core metadata scan)
+
+Next steps (Task 4+):
+- Implement NTFS MFT record parser (FILE record magic, attribute walk)
+- Implement FAT directory entry parser (LFN + 8.3)
+- Implement exFAT boot sector parser
+- Wire up Tauri events for live scan progress
+- Set up GitHub Actions dispatch from data-wizard-rs pushes to data-wizard-ci
+- Add NTFS test fixtures (small NTFS image with known files)
