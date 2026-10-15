@@ -50,6 +50,22 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            src-tauri/target
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+      # The Tauri app embeds ../ui/dist at compile time (generate_context!),
+      # so the UI bundle must exist before building src-tauri.
+      - name: Build UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
       - name: Build release binaries
         run: |
           cargo build --workspace --release
