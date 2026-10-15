@@ -32,9 +32,11 @@
 pub mod attribute;
 pub mod boot;
 pub mod error;
+pub mod filename;
 pub mod index;
 pub mod mft;
 pub mod plugin;
+pub mod walker;
 
 pub use error::{NtfsError, NtfsResult};
 pub use plugin::NtfsPlugin;

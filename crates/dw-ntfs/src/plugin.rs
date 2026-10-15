@@ -1,16 +1,18 @@
 //! FsPlugin impl for NTFS.
 //!
 //! The probe pass reads the VBR and verifies the NTFS OEM ID. The scan
-//! pass is stubbed for now — MFT walking is the next implementation
-//! milestone (see `docs/algorithms/ntfs-recovery.md`).
+//! pass runs the MFT walker (quick mode) and optionally the carver
+//! (deep mode).
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use dw_core::{CoreResult, FsPlugin, FsProbe, ProbeOutcome, ProgressSink, ResultsStore, ScanMode};
 use dw_disk::DiskSource;
+use tracing::info;
 
 use crate::boot::Vbr;
+use crate::walker::{WalkConfig, walk_mft};
 
 pub struct NtfsPlugin;
 
@@ -60,12 +62,44 @@ impl FsPlugin for NtfsPlugin {
 
     async fn scan(
         &self,
-        _source: Arc<dyn DiskSource>,
-        _mode: ScanMode,
-        _results: Arc<ResultsStore>,
-        _progress: Arc<dyn ProgressSink>,
+        source: Arc<dyn DiskSource>,
+        mode: ScanMode,
+        results: Arc<ResultsStore>,
+        progress: Arc<dyn ProgressSink>,
     ) -> CoreResult<()> {
-        // TODO: implement MFT walk + carving. See docs/algorithms/ntfs-recovery.md.
+        // Re-read the VBR to get the MFT offset + record size.
+        let bytes = source
+            .read_at_async(0, 512)
+            .await
+            .map_err(|e| dw_core::CoreError::Plugin(format!("ntfs scan VBR read: {e}")))?;
+        let mut buf = [0u8; 512];
+        buf.copy_from_slice(&bytes);
+        let vbr = Vbr::parse(&buf)
+            .map_err(|e| dw_core::CoreError::Plugin(format!("ntfs scan VBR parse: {e}")))?;
+
+        info!(
+            mft_offset = vbr.mft_offset_bytes(),
+            record_size = vbr.mft_record_size_bytes,
+            mode = ?mode,
+            "Starting NTFS scan"
+        );
+
+        let config = WalkConfig::default();
+        let entries = walk_mft(
+            source,
+            &vbr,
+            mode,
+            results.clone(),
+            progress.clone(),
+            &config,
+        )
+        .await?;
+
+        info!(entries, "NTFS scan complete");
+
+        // TODO: if mode == Deep, run the carver on unallocated clusters.
+        // For now, only the metadata walk is implemented.
+
         Ok(())
     }
 }
@@ -73,7 +107,6 @@ impl FsPlugin for NtfsPlugin {
 /// Rough ETA for the quick scan (metadata walk). Assumes ~1 M MFT
 /// records per second on a modern SSD.
 fn estimate_quick_seconds(total_bytes: u64) -> u32 {
-    // NTFS typically allocates 1 MFT record per ~8 KiB of disk, so:
     let est_records = total_bytes / (8 * 1024);
     let secs = est_records / 1_000_000;
     secs.try_into().unwrap_or(u32::MAX)

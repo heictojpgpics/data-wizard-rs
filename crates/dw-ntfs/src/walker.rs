@@ -1,0 +1,413 @@
+//! NTFS MFT walker — the core metadata scan.
+//!
+//! This module implements the "quick scan" phase for NTFS: walk every
+//! MFT record, extract file names + data runs, and build
+//! [`RecoveredEntry`]s that get appended to the [`ResultsStore`].
+//!
+//! Algorithm (clean-room, derived from public MS-NTFS spec + Linux
+//! kernel `fs/ntfs3/` + libntfs-3g; see `docs/algorithms/ntfs-recovery.md`):
+//!
+//! 1. Read the VBR to get the MFT offset, record size, and cluster size.
+//! 2. Read MFT record 0 (the $MFT file itself). Parse its $DATA attribute
+//!    to get the full MFT's cluster chain (the MFT is itself fragmented
+//!    and describes its own layout).
+//! 3. Iterate every MFT record number from 0 to the highest record
+//!    number reachable via $MFT's $DATA runs.
+//!    - For each record, read its bytes (handling the fact that the MFT
+//!      may be fragmented across multiple runs).
+//!    - Parse the FILE record (with USN fixup).
+//!    - Skip records that aren't FILE records (e.g. zero-filled free
+//!      records — they'll fail magic check).
+//!    - Extract the first Win32-namespace $FILE_NAME attribute to get
+//!      the file's name and parent directory.
+//!    - Extract the $DATA attribute to get the file's size and cluster
+//!      chain (decode the run list).
+//!    - Build a `RecoveredEntry` and append it to the results store.
+//!    - Deleted records (in-use bit clear) are STILL processed — their
+//!      $FILE_NAME and $DATA attributes are often intact.
+//! 4. Emit progress events periodically (every N records).
+
+use std::sync::Arc;
+
+use tracing::{info, trace, warn};
+use uuid::Uuid;
+
+use dw_core::{
+    CoreError, CoreResult, ProgressEvent, ProgressPhase, ProgressSink, RecoveredEntry,
+    RecoveredEntryId, RecoveryStatus, ResultsStore, ScanMode,
+};
+use dw_disk::DiskSource;
+
+use crate::NtfsError;
+use crate::boot::Vbr;
+use crate::filename::{FileName, namespace};
+use crate::mft::{FileRecord, decode_run_list};
+
+/// Configuration for the MFT walker.
+#[derive(Debug, Clone)]
+pub struct WalkConfig {
+    /// How often to emit progress events (every N records).
+    pub progress_interval: u32,
+    /// Maximum number of records to walk (0 = unlimited).
+    pub max_records: u64,
+    /// Whether to include deleted records in the results.
+    pub include_deleted: bool,
+}
+
+impl Default for WalkConfig {
+    fn default() -> Self {
+        Self {
+            progress_interval: 1024,
+            max_records: 0,
+            include_deleted: true,
+        }
+    }
+}
+
+/// Walk the MFT and append every recoverable entry to `results`.
+///
+/// This is the "quick scan" phase for NTFS. It does NOT do raw carving
+/// (that's the "deep scan" phase, handled by `dw-carver`).
+///
+/// # Arguments
+///
+/// * `source` - The disk source to read from. Must also be usable as a
+///   [`dw_disk::ReadAt`] via `as_read_at()`.
+/// * `vbr` - The parsed NTFS VBR (from the probe phase).
+/// * `mode` - Quick or Deep scan mode (the walker only does the metadata
+///   walk; deep mode just means carving will follow).
+/// * `results` - The results store to append to.
+/// * `progress` - The progress sink to emit events to.
+/// * `config` - Walker configuration.
+pub async fn walk_mft(
+    source: Arc<dyn DiskSource>,
+    vbr: &Vbr,
+    mode: ScanMode,
+    results: Arc<ResultsStore>,
+    progress: Arc<dyn ProgressSink>,
+    config: &WalkConfig,
+) -> CoreResult<u64> {
+    let scan_id = Uuid::now_v7();
+    let read_at = source.as_read_at();
+    let mft_offset = vbr.mft_offset_bytes();
+    let record_size = usize::try_from(vbr.mft_record_size_bytes).map_err(|_| {
+        CoreError::Plugin(format!(
+            "MFT record size too large: {}",
+            vbr.mft_record_size_bytes
+        ))
+    })?;
+
+    info!(
+        mft_offset,
+        record_size,
+        bytes_per_cluster = vbr.bytes_per_cluster,
+        mode = ?mode,
+        "Starting NTFS MFT walk"
+    );
+
+    // Read MFT record 0 (the $MFT file itself) to get the MFT's own cluster chain.
+    progress
+        .emit(ProgressEvent {
+            scan_id,
+            phase: ProgressPhase::QuickScan,
+            current: 0,
+            total: 1,
+            message: "Reading $MFT record 0".to_string(),
+        })
+        .await;
+
+    let mut record_buf = vec![0u8; record_size];
+    read_at
+        .read_at(mft_offset, &mut record_buf)
+        .map_err(CoreError::Disk)?;
+
+    let mft_record = FileRecord::parse(&record_buf, record_size)
+        .map_err(|e| CoreError::Plugin(format!("parse $MFT record 0: {e}")))?;
+
+    // Find $MFT's own $DATA attribute (non-resident) to get its run list.
+    let mft_data = mft_record
+        .data_attribute()
+        .ok_or_else(|| CoreError::Plugin("$MFT has no $DATA attribute".into()))?;
+
+    let mft_runs = match &mft_data.data {
+        crate::mft::AttributeData::NonResident { run_list, .. } => decode_run_list(run_list)
+            .map_err(|e| CoreError::Plugin(format!("decode $MFT run list: {e}")))?,
+        crate::mft::AttributeData::Resident { .. } => {
+            return Err(CoreError::Plugin(
+                "$MFT $DATA is resident (expected non-resident)".into(),
+            ));
+        }
+    };
+
+    // Compute total number of MFT records from $MFT's data size.
+    let mft_total_bytes: u64 =
+        mft_runs.iter().map(|r| r.length).sum::<u64>() * u64::from(vbr.bytes_per_cluster);
+    let total_records = mft_total_bytes / u64::from(vbr.mft_record_size_bytes);
+    info!(total_records, "MFT record count from $MFT $DATA");
+
+    // Build a run-position index so we can map an absolute MFT byte offset
+    // to (run_index, offset_within_run).
+    let mut run_boundaries: Vec<(u64, u64, u64)> = Vec::new(); // (start_byte, end_byte, disk_offset)
+    let mut cursor = 0u64;
+    for run in &mft_runs {
+        let len_bytes = run.length * u64::from(vbr.bytes_per_cluster);
+        if let Some(disk_off) = run.offset {
+            run_boundaries.push((
+                cursor,
+                cursor + len_bytes,
+                disk_off * u64::from(vbr.bytes_per_cluster),
+            ));
+        }
+        cursor += len_bytes;
+    }
+
+    let total_records_to_walk = if config.max_records > 0 {
+        config.max_records.min(total_records)
+    } else {
+        total_records
+    };
+
+    info!(
+        total_records_to_walk,
+        include_deleted = config.include_deleted,
+        "Beginning MFT record iteration"
+    );
+
+    let mut records_processed: u64 = 0;
+    let mut entries_emitted: u64 = 0;
+    let mut errors: u64 = 0;
+
+    for record_number in 0..total_records_to_walk {
+        // Map record_number → absolute MFT byte offset
+        let mft_byte_offset = record_number * u64::from(vbr.mft_record_size_bytes);
+
+        // Find the run that contains this offset
+        let disk_offset = match locate_in_runs(&run_boundaries, mft_byte_offset) {
+            Some(off) => off + mft_offset,
+            None => {
+                // This record is in a sparse region of $MFT — skip.
+                continue;
+            }
+        };
+
+        // Read the record
+        if let Err(e) = read_at.read_at(disk_offset, &mut record_buf) {
+            trace!(record_number, error = %e, "Failed to read MFT record");
+            errors += 1;
+            continue;
+        }
+
+        // Parse it. Most free records will fail the magic check — that's normal.
+        let record = match FileRecord::parse(&record_buf, record_size) {
+            Ok(r) => r,
+            Err(NtfsError::Corrupt(msg)) => {
+                // Free/zero-filled records produce "bad magic" — that's fine.
+                // Anything else is worth a debug log.
+                if !msg.starts_with("MFT record bad magic") {
+                    trace!(record_number, error = %msg, "MFT record parse error");
+                }
+                continue;
+            }
+            Err(e) => {
+                trace!(record_number, error = %e, "MFT record parse error");
+                errors += 1;
+                continue;
+            }
+        };
+
+        // Skip extension records (base_record_reference != 0) — their info
+        // is attributed to the base record.
+        if record.base_record_reference != 0 {
+            continue;
+        }
+
+        let is_deleted = !record.is_in_use();
+        if is_deleted && !config.include_deleted {
+            continue;
+        }
+
+        // Extract the best file name (prefer Win32 namespace, fall back to DOS).
+        let file_name = pick_best_file_name(&record);
+        if file_name.is_none() {
+            // No name — probably a system file with only $OBJECT_ID. Skip.
+            continue;
+        }
+        let file_name = file_name.unwrap();
+
+        // Extract $DATA attribute (may be absent for directories).
+        let data_attr = record.data_attribute();
+        let (file_size, cluster_chain) = match data_attr {
+            Some(attr) => {
+                match &attr.data {
+                    crate::mft::AttributeData::Resident { content } => {
+                        // Small file: data is inline in the MFT record.
+                        (content.len() as u64, Vec::new())
+                    }
+                    crate::mft::AttributeData::NonResident {
+                        run_list,
+                        real_size,
+                        ..
+                    } => {
+                        let runs = decode_run_list(run_list).unwrap_or_default();
+                        let chain: Vec<u64> = runs.iter().filter_map(|r| r.offset).collect();
+                        (*real_size, chain)
+                    }
+                }
+            }
+            None => {
+                // Directory or metadata file with no $DATA — size is 0.
+                (0, Vec::new())
+            }
+        };
+
+        // Build the recovered entry.
+        let parent_path = if file_name.is_in_root() {
+            String::from("\\")
+        } else {
+            // We don't yet have the full parent path resolution (would
+            // require building a record→path map). Use the parent record
+            // number as a placeholder; a follow-up pass can resolve paths.
+            format!("\\[parent-{}]", file_name.parent_record_number)
+        };
+
+        let extension = file_name
+            .name
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_lowercase())
+            .unwrap_or_default();
+
+        let entry = RecoveredEntry {
+            id: RecoveredEntryId(Uuid::now_v7()),
+            fs_kind: "ntfs".to_string(),
+            parent_path,
+            name: file_name.name.clone(),
+            size: file_size,
+            start_lba: cluster_chain.first().copied(),
+            mtime: file_name.modification_time,
+            ctime: file_name.creation_time,
+            status: RecoveryStatus::Intact,
+            extension,
+            mime: None,
+            confidence: 1000,
+            was_deleted: is_deleted,
+            cluster_chain,
+        };
+
+        results.insert(entry);
+        entries_emitted += 1;
+
+        records_processed += 1;
+
+        // Emit progress periodically
+        if records_processed.is_multiple_of(u64::from(config.progress_interval)) {
+            progress
+                .emit(ProgressEvent {
+                    scan_id,
+                    phase: ProgressPhase::QuickScan,
+                    current: records_processed,
+                    total: total_records_to_walk,
+                    message: format!(
+                        "Walked {records_processed}/{total_records_to_walk} MFT records, {entries_emitted} entries found"
+                    ),
+                })
+                .await;
+        }
+    }
+
+    info!(
+        records_processed,
+        entries_emitted, errors, "MFT walk complete"
+    );
+
+    progress
+        .emit(ProgressEvent {
+            scan_id,
+            phase: ProgressPhase::QuickScan,
+            current: records_processed,
+            total: total_records_to_walk,
+            message: format!("MFT walk done: {entries_emitted} entries, {errors} errors"),
+        })
+        .await;
+
+    Ok(entries_emitted)
+}
+
+/// Pick the best `$FILE_NAME` attribute from a record.
+///
+/// Preference order:
+/// 1. Win32 namespace (the normal long name)
+/// 2. POSIX namespace (case-sensitive name)
+/// 3. Win32+DOS namespace (paired name; treat as Win32)
+/// 4. DOS namespace (8.3 short name — last resort)
+fn pick_best_file_name(record: &FileRecord) -> Option<FileName> {
+    let mut win32: Option<FileName> = None;
+    let mut posix: Option<FileName> = None;
+    let mut dos: Option<FileName> = None;
+
+    for attr in record.file_name_attributes() {
+        if let Some(content) = attr.resident_content() {
+            match FileName::parse(content) {
+                Ok(fn_attr) => {
+                    if fn_attr.is_win32_namespace() && win32.is_none() {
+                        win32 = Some(fn_attr);
+                    } else if fn_attr.namespace == namespace::POSIX && posix.is_none() {
+                        posix = Some(fn_attr);
+                    } else if fn_attr.is_dos_namespace() && dos.is_none() {
+                        dos = Some(fn_attr);
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to parse $FILE_NAME attribute");
+                }
+            }
+        }
+    }
+
+    win32.or(posix).or(dos)
+}
+
+/// Locate an absolute MFT byte offset within the run boundaries.
+///
+/// Returns the disk byte offset (relative to the start of the volume)
+/// where the requested MFT byte lives.
+fn locate_in_runs(run_boundaries: &[(u64, u64, u64)], mft_byte_offset: u64) -> Option<u64> {
+    for &(start, end, disk_off) in run_boundaries {
+        if mft_byte_offset >= start && mft_byte_offset < end {
+            return Some(disk_off + (mft_byte_offset - start));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn locate_in_runs_finds_first_run() {
+        let runs = vec![(0, 1000, 10_000), (1000, 2000, 20_000)];
+        assert_eq!(locate_in_runs(&runs, 0), Some(10_000));
+        assert_eq!(locate_in_runs(&runs, 500), Some(10_500));
+        assert_eq!(locate_in_runs(&runs, 999), Some(10_999));
+    }
+
+    #[test]
+    fn locate_in_runs_finds_second_run() {
+        let runs = vec![(0, 1000, 10_000), (1000, 2000, 20_000)];
+        assert_eq!(locate_in_runs(&runs, 1000), Some(20_000));
+        assert_eq!(locate_in_runs(&runs, 1500), Some(20_500));
+    }
+
+    #[test]
+    fn locate_in_runs_returns_none_for_gap() {
+        // Simulate a sparse MFT: run 0 covers 0..1000, run 2 covers 2000..3000
+        let runs = vec![(0, 1000, 10_000), (2000, 3000, 30_000)];
+        assert_eq!(locate_in_runs(&runs, 1500), None);
+    }
+
+    #[test]
+    fn locate_in_runs_returns_none_for_empty() {
+        let runs: Vec<(u64, u64, u64)> = vec![];
+        assert_eq!(locate_in_runs(&runs, 0), None);
+    }
+}
