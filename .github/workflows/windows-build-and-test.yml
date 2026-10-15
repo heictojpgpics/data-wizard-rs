@@ -141,12 +141,26 @@ jobs:
           "@
           $manifest | Set-Content "$out\AppxManifest.xml" -Encoding utf8
 
-          # --- MakeAppx ---
-          $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64" |
-            Sort-Object { [version]$_.Directory.Name } -Descending | Select-Object -First 1
-          $makeappx = Join-Path $sdk.FullName "makeappx.exe"
-          $signtool  = Join-Path $sdk.FullName "signtool.exe"
-          if (-not (Test-Path $makeappx)) { throw "makeappx.exe not found under Windows Kits" }
+          # --- MakeAppx + signtool (robust discovery across runner images) ---
+          $tools = @{}
+          foreach ($exe in @("makeappx.exe", "signtool.exe")) {
+            $hit = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\$exe",
+                                 "C:\Program Files (x86)\Windows Kits\10\bin\$exe",
+                                 "C:\Program Files\Windows Kits\10\bin\*\x64\$exe" `
+              -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            if (-not $hit) {
+              Write-Host "=== $exe not found; Windows Kits bin tree: ==="
+              Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Depth 2 \
+                -ErrorAction SilentlyContinue | Select-Object -First 40 |
+                ForEach-Object { Write-Host $_.FullName }
+              throw "$exe not found under Windows Kits"
+            }
+            $tools[$exe] = $hit.FullName
+            Write-Host "Using $($hit.FullName)"
+          }
+          $makeappx = $tools["makeappx.exe"]
+          $signtool  = $tools["signtool.exe"]
           & $makeappx pack /o /h SHA256 /d $out /p "$out\DataWizard.msix"
           if ($LASTEXITCODE -ne 0) { throw "makeappx failed: $LASTEXITCODE" }
 
