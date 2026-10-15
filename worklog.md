@@ -729,3 +729,69 @@ Stage Summary:
 - Both repos' core workflows green on the draft branch at HEAD
 - 234 tests, clippy clean, fmt clean, UI typecheck/lint/build clean,
   src-tauri msvc cross-check clean, winchecksec mitigations all present
+
+---
+Task ID: 1 (session 6)
+Agent: main (Super Z)
+Task: Age-map removal, CI consolidation + build repair, full remaining implementation (ext4, NTFS $I30, Btrfs), deep RE pass, release-artifact verification
+
+Work Log:
+- Context recovery: environment reverted to a pre-project snapshot;
+  re-cloned all four repos from GitHub (nothing lost - all work was
+  pushed), re-downloaded the EaseUS payload (1470 files / 674 MB, exact
+  match), reinstalled the toolchain (Rust 1.99.1, llvm-rc via deb
+  extraction, JDK 21 for Ghidra).
+- Removed the age-map feature end to end (mis-pasted requirement from an
+  unrelated project): dw-core classify by_month/no_timestamp, dw-ipc
+  AgeBucketDto, src-tauri month mapping, AgeMap.tsx, bindings, tests;
+  *.tsbuildinfo artifacts untracked + gitignored. 234 -> 232 tests.
+- Diagnosed the "green but no artifacts" CI failure: tauri-cli had been
+  installed with --no-default-features (no TLS backend -> 'TLS required,
+  but transport is unsecured' on the WiX download) AND the bundle step
+  was continue-on-error AND uploads were warn-if-missing. All three
+  fixed: default-features install, mandatory bundle, uploads fail when
+  files are absent.
+- Consolidated data-wizard-ci into this repo: five workflows ported and
+  adapted (Build and Test with real installer smoke tests - msiexec
+  silent install/launch/uninstall and Add-AppxPackage/Remove-AppxPackage
+  for the MSIX; Security Scan with winchecksec on dw-scan AND dw-tauri
+  after a UI build; Nightly Verification over VHDs; real 11-target fuzz
+  matrix; Benchmarks), release.yml rewritten to publish MSI + NSIS +
+  MSIX + portable ZIP + SHASUMS256 on tags. Runner images windows-latest,
+  Node 24, npm ci with the committed lockfile.
+- Deep RE pass (Ghidra 12.1.4 headless, all 17 engine/orchestration
+  binaries decompiled, findings in
+  open-recovery-wizard/docs/08-driver-and-module-re.md): driver map
+  (no recovery logic in drivers - filter/raw-device + minirdr only;
+  we ship none, documented), raw_signs.json schema parity confirmed
+  (our 258-signature DB already carries footer/size/weight), their 134
+  structural analysers vs our 5 (breadth roadmap), $LogFile/$UsnJrnl
+  confirmed in the reference, Btrfs/ReFS/Zfs confirmed real there.
+- ext4 engine (was a stub): full implementation - superblock validation,
+  group descriptors/bitmaps, inodes with extended epochs + crtime,
+  extent trees AND legacy indirect maps, shadow-dirent deleted-name scan,
+  orphan pass, free-block carving; 31 unit + 8 integration tests over a
+  synthetic volume. Also deleted the journal.rs stub (documented roadmap,
+  no pretend feature).
+- NTFS: index.rs TODO stub replaced with a real $I30 parser (INDEX_ROOT
+  + INDX with fixup); deep pass surfaces names/sizes/timestamps from
+  surviving directory indexes for records the MFT pass could not parse;
+  fixed the latent parent_path bug (was the file's own path, now the
+  parent directory's, consistent with every other engine).
+- Removed the btrfs/refs/zfs fake stubs; then SHIPPED a real Btrfs engine
+  (offsets compiled against btrfs_tree.h with offsetof; crc32c-verified
+  superblock/nodes; chunk mapping through non-identity chunks; live
+  subvolume walks; COW orphan-tree-block deep pass; single-device
+  non-RAID scope, honestly stated) - 16 unit + 6 integration tests.
+  ReFS/Zfs stay honestly absent with the reference evidence recorded.
+- Fuzz: dw-hfs targets added earlier tonight; dw-btrfs fuzz_superblock +
+  fuzz_items added and smoke-verified; all wired into the fuzz matrix.
+- README support matrix now claims only real engines (NTFS/FAT/exFAT/
+  HFS+/ext2-3-4/Btrfs + raw carving), with honest scope notes.
+
+Stage Summary:
+- 300 tests, fmt/clippy clean, windows-msvc cross-checks clean
+- Pipeline: CI + Security Scan green on draft; Build and Test verifying
+  the full artifact chain (MSI/NSIS/MSIX/portable + installer tests)
+- Pending at write time: Build and Test green on the final commit,
+  manual verification dispatch, data-wizard-ci deletion, main merge
