@@ -112,4 +112,4 @@ jobs:
             -H "Authorization: token ${{ secrets.CI_DISPATCH_TOKEN }}" \
             -H "Accept: application/vnd.github+json" \
             https://api.github.com/repos/heictojpgpics/data-wizard-ci/dispatches \
-            -d '{"event_type":"data-wizard-rs-push","client_payload":{"ref":"'"${{ github.ref_name }}"'","sha":"'"${{ github.sha }}"'"}}'
+            -d '{"event_type":"data-wizard-rs-push","client_payload":{"ref":"'"${{ github.event.pull_request.head.ref || github.ref_name }}"'","sha":"'"${{ github.sha }}"'"}}'
