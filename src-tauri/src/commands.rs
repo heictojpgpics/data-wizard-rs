@@ -252,7 +252,7 @@ pub async fn recover_files(
         let dest_path = dest_dir.join(&safe_name);
 
         // Read the file data from the source.
-        match recover_one_file(&entry, read_at.as_ref(), &dest_path) {
+        match dw_core::recovery::recover_entry_to_path(&entry, read_at.as_ref(), &dest_path) {
             Ok(bytes_written) => {
                 info!(
                     entry = %entry_id_str,
@@ -276,45 +276,6 @@ pub async fn recover_files(
         failed,
         errors,
     })
-}
-
-/// Recover a single file by reading its clusters from the source and
-/// writing to the destination.
-fn recover_one_file(
-    entry: &dw_core::RecoveredEntry,
-    read_at: &dyn dw_disk::ReadAt,
-    dest_path: &Path,
-) -> Result<u64, String> {
-    if entry.cluster_chain.is_empty() {
-        // No cluster chain — either resident (data in MFT) or empty file.
-        // For now, create an empty file.
-        std::fs::write(dest_path, b"").map_err(|e| format!("write empty file: {e}"))?;
-        return Ok(0);
-    }
-
-    // Read each cluster in the chain and write to the destination.
-    // We don't know the cluster size here (it's FS-specific), but we can
-    // read the entire file as a contiguous block if the clusters are
-    // contiguous, or read cluster-by-cluster if not.
-    //
-    // For now, we use a simple approach: read `entry.size` bytes starting
-    // from the first cluster's byte offset (computed from the first LBA
-    // in the chain). This works for contiguous files.
-    //
-    // TODO: for fragmented files, we need the cluster size + FAT chain to
-    // read each cluster separately. This requires storing the FS-specific
-    // cluster size in the RecoveredEntry (future improvement).
-    let start_byte = entry.start_lba.unwrap_or(0) * 512; // assume 512 bytes/sector for now
-    let read_len = entry.size.min(1024 * 1024 * 1024); // cap at 1 GB for safety
-
-    let mut buf = vec![0u8; read_len as usize];
-    read_at
-        .read_at(start_byte, &mut buf)
-        .map_err(|e| format!("read source: {e}"))?;
-
-    std::fs::write(dest_path, &buf).map_err(|e| format!("write dest: {e}"))?;
-
-    Ok(read_len)
 }
 
 /// Sanitize a filename for safe writing to the destination directory.

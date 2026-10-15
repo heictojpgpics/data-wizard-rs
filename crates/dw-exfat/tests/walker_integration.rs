@@ -16,6 +16,8 @@
 //!   10    "docs/note.md" in-use, NoFatChain, 200 bytes
 //!   11..65 free
 
+#![allow(clippy::panic, clippy::expect_used, clippy::unwrap_used)]
+
 use std::sync::Arc;
 
 use dw_core::{ProgressEvent, ProgressSink, RecoveryStatus, ResultsStore};
@@ -50,11 +52,11 @@ fn ts(date: u16, time: u16) -> u32 {
 }
 
 const DATE_2021_06_15: u16 = (41 << 9) | (6 << 5) | 15; // 2021-06-15
-const TIME_1430_20: u16 = (14 << 11) | (30 << 5) | 10; // 14:30:20
+const TIME_1430_20: u16 = (14 << 11) | (30 << 5) | 10; // 14:30:20 [skip]
 const DATE_2022_01_01: u16 = (42 << 9) | (1 << 5) | 1; // 2022-01-01
-const TIME_1000_10: u16 = (10 << 11) | (0 << 5) | 5; // 10:00:10
+const TIME_1000_10: u16 = (10 << 11) | 5; // 10:00:10 (min=0)
 const DATE_2022_01_02: u16 = (42 << 9) | (1 << 5) | 2; // 2022-01-02
-const TIME_1200_04: u16 = (12 << 11) | (0 << 5) | 2; // 12:00:04
+const TIME_1200_04: u16 = (12 << 11) | 2; // 12:00:04 (min=0)
 
 fn put_entry_set(
     img: &mut [u8],
