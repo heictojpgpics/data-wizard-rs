@@ -76,6 +76,15 @@ jobs:
       - name: Build Tauri bundle (MSI + NSIS)
         run: cargo tauri build --target x86_64-pc-windows-msvc --bundles msi,nsis
 
+      - name: Build portable ZIP
+        shell: pwsh
+        run: |
+          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
+          if (-not (Test-Path $exe)) { throw "portable exe missing: $exe" }
+          $zip = "data-wizard-${{ github.sha }}-windows-portable.zip"
+          Compress-Archive -Path $exe -DestinationPath $zip
+          Write-Host "Zip: $zip"
+
       - name: Package MSIX
         shell: pwsh
         run: |
@@ -182,15 +191,6 @@ jobs:
           3. Launch "Data Wizard" from the Start menu.
           '@ | Set-Content "$out\README-MSIX.txt" -Encoding utf8
           Write-Host "MSIX packaged: $out\DataWizard.msix"
-
-      - name: Build portable ZIP
-        shell: pwsh
-        run: |
-          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
-          if (-not (Test-Path $exe)) { throw "portable exe missing: $exe" }
-          $zip = "data-wizard-${{ github.sha }}-windows-portable.zip"
-          Compress-Archive -Path $exe -DestinationPath $zip
-          Write-Host "Zip: $zip"
 
       - name: Test MSI install / launch / uninstall
         shell: pwsh

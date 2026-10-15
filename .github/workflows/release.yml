@@ -58,6 +58,32 @@ jobs:
       - name: Build Tauri bundle (MSI + NSIS)
         run: cargo tauri build --target x86_64-pc-windows-msvc --bundles msi,nsis
 
+      - name: Build portable ZIP
+        shell: pwsh
+        run: |
+          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
+          if (-not (Test-Path $exe)) { throw "portable exe missing" }
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag -or $tag -eq "main") { $tag = "v${{ inputs.version }}" }
+          Compress-Archive -Path $exe -DestinationPath "data-wizard-$tag-windows-portable.zip"
+          Write-Host "Zip: data-wizard-$tag-windows-portable.zip"
+
+      - name: Stage release files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi" -Destination release\
+          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe" -Destination release\
+          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\DataWizard.msix" -Destination release\
+          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\DataWizard-Test.cer" -Destination release\
+          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\README-MSIX.txt" -Destination release\
+          Move-Item "data-wizard-*-windows-portable.zip" -Destination release\
+          Get-ChildItem release | ForEach-Object {
+            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+            "$h  $($_.Name)" | Add-Content release\SHASUMS256.txt
+          }
+          Get-ChildItem release | Select-Object Name, Length | Format-Table
+
       - name: Package MSIX
         shell: pwsh
         run: |
@@ -158,32 +184,6 @@ jobs:
           3. Launch "Data Wizard" from the Start menu.
           '@ | Set-Content "$out\README-MSIX.txt" -Encoding utf8
           Write-Host "MSIX packaged"
-
-      - name: Build portable ZIP
-        shell: pwsh
-        run: |
-          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
-          if (-not (Test-Path $exe)) { throw "portable exe missing" }
-          $tag = "${{ github.ref_name }}"
-          if (-not $tag -or $tag -eq "main") { $tag = "v${{ inputs.version }}" }
-          Compress-Archive -Path $exe -DestinationPath "data-wizard-$tag-windows-portable.zip"
-          Write-Host "Zip: data-wizard-$tag-windows-portable.zip"
-
-      - name: Stage release files
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi" -Destination release\
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe" -Destination release\
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\DataWizard.msix" -Destination release\
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\DataWizard-Test.cer" -Destination release\
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\README-MSIX.txt" -Destination release\
-          Move-Item "data-wizard-*-windows-portable.zip" -Destination release\
-          Get-ChildItem release | ForEach-Object {
-            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
-            "$h  $($_.Name)" | Add-Content release\SHASUMS256.txt
-          }
-          Get-ChildItem release | Select-Object Name, Length | Format-Table
 
       - name: Verify staged files (fail if any channel is empty)
         shell: pwsh
