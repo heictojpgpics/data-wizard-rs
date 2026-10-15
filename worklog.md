@@ -406,3 +406,39 @@ Next steps (Task 7+):
 - Improve file recovery: handle fragmented files (read cluster-by-cluster)
 - Add more analyser validators (JPEG EOI, ZIP EOCD, PNG IEND)
 - Expand signature DB to 200+ (add more from GCF)
+
+---
+Task ID: 7
+Agent: main
+Task: Recover full context (fresh environment), merge EaseUS payload, plan Task 7+ implementation
+
+Work Log:
+- Fresh environment: wiped workspace, re-downloaded all 4 EaseUS artifacts (sizes verified
+  byte-exact), merged Part-1 + Part-2 into work/easeus-src/merged (1,470 files, 674 MiB,
+  no collisions - matches prior session records).
+- Cloned all project repos: data-wizard-rs, open-recovery-wizard, recovarr, data-wizard-ci.
+- Read worklog tasks 1-6 + docs INDEX + open-recovery-wizard clean-room charter, algorithm
+  reconstruction, engineering program. Full context recovered.
+- Baseline verified: 89 tests passing, 0 failures (31 NTFS + 20 FAT + 28 exFAT + 7 sig + 2 carver + 1 integ).
+- Rust 1.99.0 installed via rustup (fresh env had no cargo).
+- Implementation plan for this session (the 8 next steps + foundations):
+  A. dw-core: RecoveredEntry += {extents, atime, resident_data} - canonical physical extents
+     per open-recovery-wizard 05 §3 Phase C ("represent physical content as canonical extents")
+  B. FAT timestamp decoding (FAT date/time bitfields -> OffsetDateTime, strict validation)
+  C. FAT walker: populate extents + timestamps; unallocated-region carving on deep scan
+  D. exFAT: implement fat.rs (chain), bitmap.rs (allocation), walker.rs (entry-set walk) +
+     extents + unallocated carving
+  E. NTFS walker: data runs -> extents (bytes/cluster), resident content capture
+  F. recover_one_file rewrite: extent-based sequential I/O (fragmented files), no contiguous
+     fallback, typed errors
+  G. dw-carver: per-format analysers (JPEG marker walk to EOI, PNG chunk walk to IEND,
+     ZIP EOCD walk) + footer strategy + capped-unvalidated tier; carve_region emits
+     validated entries with real sizes + extents
+  H. Signature DB: 110 -> 200+ (GCF-sourced, verified, cited)
+  I. dw-disk: GPT/MBR partition enumeration (CRC32-validated GPT, EBR chains) +
+     list_partitions for images + Windows PhysicalDrive mapping
+  J. dw-core checkpoint.rs: scan resume (persist/restore + source fingerprint validation)
+
+Stage Summary:
+- Context fully recovered; EaseUS payload re-merged; baseline green.
+- Beginning implementation of the 8 next steps in dependency order A-J.
