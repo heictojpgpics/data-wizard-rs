@@ -695,3 +695,37 @@ Next steps:
 - Two-byte bucket filter for the matcher worst case
 - Windows-runner UI smoke test (launch the built app, screenshot, click
   through scan on a fixture image)
+
+---
+Task ID: 10.1 (session 5 addendum)
+Agent: main
+Task: CI green verification + CFG hardening
+
+Work Log:
+- Security Scan green on draft: the winchecksec chain took four fixes,
+  each verified against the real runner logs:
+  1. wrong exe in the release zip (CMake tree; Select -First 1 grabbed
+     CompilerIdC.exe) -> pinned build/Release path
+  2. STATUS_DLL_NOT_FOUND despite vcredist140 -> companion DLLs
+     pe-parse.dll + uthenticode.dll ship in the zip and must sit next
+     to the exe
+  3. still DLL_NOT_FOUND -> uthenticode needs libcrypto-1_1-x64.dll
+     (also in the zip; full import chain walked from PE headers)
+  4. 'Couldn't load file' -> v3.1.0 CLI is --json, not --format json;
+     and the JSON nests mitigations with presence strings (the flat
+     DynamicBase/NxCompat/GuardCF fields never existed)
+- Real finding along the way: our binary lacked Control Flow Guard
+  (rustc does not enable it by default). Enabled via
+  .cargo/config.toml control-flow-guard=yes for all MSVC builds; the
+  carver walks untrusted bytes so indirect-call instrumentation earns
+  its marginal cost. winchecksec now reports ASLR, DEP, GS,
+  high-entropy VA and CFG all Present.
+- ci.yml forwards the PR head branch (PR events have ref_name 'N/merge'
+  which data-wizard-ci cannot fetch)
+- rs CI green on draft AND main; Build and Test + Security Scan verified
+  green on draft at the final commit state
+
+Stage Summary:
+- Both repos' core workflows green on the draft branch at HEAD
+- 234 tests, clippy clean, fmt clean, UI typecheck/lint/build clean,
+  src-tauri msvc cross-check clean, winchecksec mitigations all present
