@@ -4,17 +4,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use tauri::AppHandle;
 use uuid::Uuid;
 
-use dw_core::{ProgressSink, ScanHandle};
+use dw_core::ScanHandle;
+
+use crate::progress_sink::TauriProgressSink;
 
 pub struct AppState {
+    pub app: AppHandle,
     pub scans: HashMap<Uuid, ScanRecord>,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
+impl AppState {
+    pub fn new(app: AppHandle) -> Self {
         Self {
+            app,
             scans: HashMap::new(),
         }
     }
@@ -22,30 +27,15 @@ impl Default for AppState {
 
 pub struct ScanRecord {
     pub handle: ScanHandle,
-    pub progress: Arc<dyn ProgressSink>,
 }
 
 impl ScanRecord {
     pub fn new(handle: ScanHandle) -> Self {
-        let (_sink, _rx) = dw_core::progress::BroadcastSink::new(handle.id(), 64);
-        // NOTE: For now we use a no-op sink. The Tauri command layer will
-        //       wire this up to forward events to the webview in a follow-up.
-        struct NoOpSink;
-        #[async_trait::async_trait]
-        impl ProgressSink for NoOpSink {
-            async fn emit(&self, _e: dw_core::ProgressEvent) {}
-            async fn fail(&self, _m: String) {}
-            async fn done(&self) {}
-        }
-        Self {
-            handle,
-            progress: Arc::new(NoOpSink),
-        }
+        Self { handle }
     }
-}
 
-// Silence unused-import warning for RwLock (used implicitly via State).
-#[allow(dead_code)]
-fn _unused() -> Arc<RwLock<()>> {
-    Arc::new(RwLock::new(()))
+    /// Create a `TauriProgressSink` for this scan.
+    pub fn progress_sink(&self, app: &AppHandle) -> Arc<TauriProgressSink> {
+        Arc::new(TauriProgressSink::new(app.clone(), self.handle.id()))
+    }
 }

@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod progress_sink;
 mod state;
 
 use std::sync::Arc;
@@ -23,8 +24,6 @@ fn main() {
 
     tracing::info!("Data Wizard starting up");
 
-    let app_state = Arc::new(RwLock::new(AppState::default()));
-
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
@@ -34,7 +33,6 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::list_disks,
             commands::start_scan,
@@ -44,8 +42,11 @@ fn main() {
             commands::recover_files,
         ])
         .setup(|app| {
+            // Create the app state with the AppHandle (needed for
+            // TauriProgressSink to emit events to the webview).
+            let state = Arc::new(RwLock::new(AppState::new(app.handle().clone())));
+            app.manage(state);
             tracing::info!("Tauri setup complete");
-            let _ = app;
             Ok(())
         })
         .run(tauri::generate_context!())

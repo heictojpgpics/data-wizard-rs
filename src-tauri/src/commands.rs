@@ -7,11 +7,14 @@
 //!  4. Converts the result to the IPC DTO.
 //!  5. Returns to the webview.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use tauri::State;
 use tracing::{info, warn};
+
+use dw_disk::FileBackedSource;
 
 use dw_ipc::commands::*;
 
@@ -35,6 +38,7 @@ pub async fn start_scan(
     req: StartScanRequest,
 ) -> Result<StartScanResponse, String> {
     info!(source = %req.source_uri, deep = req.deep, "start_scan");
+
     let mode = if req.deep {
         dw_core::ScanMode::Deep
     } else {
@@ -48,13 +52,69 @@ pub async fn start_scan(
         file_filter: req.file_filter,
     };
     dw_core::scan::validate_config(&cfg).map_err(|e| e.to_string())?;
+
+    // Open the source. For now, only file-backed sources are supported.
+    // TODO: support Windows raw disk paths (\\.\PhysicalDriveN, \\.\X:).
+    let source_uri = req.source_uri.clone();
+    let source_path = parse_source_uri(&source_uri)?;
+    let source = Arc::new(
+        FileBackedSource::open(&source_path).map_err(|e| format!("open source: {e}"))?,
+    );
+
     let handle = dw_core::ScanHandle::new(cfg);
     let scan_id = handle.id();
-    let record = ScanRecord::new(handle);
+    let record = ScanRecord::new(handle.clone());
+
+    // Register the plugins.
+    let plugins: Vec<Arc<dyn dw_core::FsPlugin>> = vec![
+        Arc::new(dw_ntfs::NtfsPlugin::default()),
+        Arc::new(dw_fat::FatPlugin::default()),
+        Arc::new(dw_exfat::ExfatPlugin::default()),
+        Arc::new(dw_ext::ExtPlugin::default()),
+        Arc::new(dw_hfs::HfsPlugin::default()),
+        Arc::new(dw_btrfs::BtrfsPlugin::default()),
+        Arc::new(dw_refs::RefsPlugin::default()),
+        Arc::new(dw_zfs::ZfsPlugin::default()),
+    ];
+
+    // Get the AppHandle from state.
+    let app = {
+        let g = state.read();
+        g.app.clone()
+    };
+
+    // Create the progress sink.
+    let progress = record.progress_sink(&app);
+
+    // Create the scan.
+    let scan = dw_core::Scan::new(handle.clone(), source, plugins, progress);
+
+    // Store the scan record.
     {
         let mut g = state.write();
         g.scans.insert(scan_id, record);
     }
+
+    // Spawn the scan as a background task.
+    let state_clone = Arc::clone(state.inner());
+    tokio::spawn(async move {
+        info!(scan_id = %scan_id, "Scan task started");
+        let result = scan.run().await;
+        match &result {
+            Ok(()) => info!(scan_id = %scan_id, "Scan task completed"),
+            Err(e) => {
+                warn!(scan_id = %scan_id, error = %e, "Scan task failed");
+                // Update the scan state to Failed if it wasn't cancelled.
+                let g = state_clone.read();
+                if let Some(record) = g.scans.get(&scan_id) {
+                    if record.handle.state() != dw_core::ScanState::Cancelled {
+                        record.handle.set_state(dw_core::ScanState::Failed);
+                    }
+                }
+            }
+        }
+    });
+
     Ok(StartScanResponse {
         scan_id: scan_id.to_string(),
     })
@@ -127,10 +187,14 @@ pub async fn list_results(
             mtime: e.mtime.map(|t| t.to_string()),
             status: match e.status {
                 dw_core::RecoveryStatus::Intact => dw_ipc::RecoveryStatusDto::Intact,
-                dw_core::RecoveryStatus::PartiallyRecovered => dw_ipc::RecoveryStatusDto::PartiallyRecovered,
+                dw_core::RecoveryStatus::PartiallyRecovered => {
+                    dw_ipc::RecoveryStatusDto::PartiallyRecovered
+                }
                 dw_core::RecoveryStatus::Overwritten => dw_ipc::RecoveryStatusDto::Overwritten,
                 dw_core::RecoveryStatus::Carved => dw_ipc::RecoveryStatusDto::Carved,
-                dw_core::RecoveryStatus::PendingValidation => dw_ipc::RecoveryStatusDto::PendingValidation,
+                dw_core::RecoveryStatus::PendingValidation => {
+                    dw_ipc::RecoveryStatusDto::PendingValidation
+                }
             },
             extension: e.extension,
             mime: e.mime,
@@ -160,4 +224,22 @@ pub async fn recover_files(
         failed: 0,
         errors: vec!["recovery not yet implemented".into()],
     })
+}
+
+/// Parse a source URI into a filesystem path.
+///
+/// Supported formats:
+/// - `file:///absolute/path` → `/absolute/path`
+/// - `/absolute/path` → `/absolute/path` (Unix)
+/// - `C:\path\to\file` → `C:\path\to\file` (Windows)
+/// - `\\.\PhysicalDrive0` → passed through (Windows raw disk; requires
+///   WindowsRawSource, not yet wired up)
+fn parse_source_uri(uri: &str) -> Result<std::path::PathBuf, String> {
+    if let Some(path) = uri.strip_prefix("file://") {
+        Ok(Path::new(path).to_path_buf())
+    } else if uri.starts_with('/') || uri.starts_with('\\') || uri.contains(':') {
+        Ok(Path::new(uri).to_path_buf())
+    } else {
+        Err(format!("unsupported source URI: {uri}"))
+    }
 }
