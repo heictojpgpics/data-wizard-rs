@@ -32,6 +32,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+pub mod analysers;
 pub mod bifragment;
 pub mod error;
 pub mod fragment;
