@@ -1,7 +1,7 @@
 // Results browser: stats overview, age map, category filters, sortable
 // paged table with selection, and the recovery flow.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ListResultsResponse,
@@ -33,7 +33,10 @@ export function ResultsView({ scanId, onBack }: Props) {
   const [items, setItems] = useState<RecoveredFile[]>([]);
   const [total, setTotal] = useState(0);
   const [spilled, setSpilled] = useState(0);
-  const [loading, setLoading] = useState(true);
+  // `loading` is derived from which page has actually been fetched, so
+  // no synchronous setState is needed inside the effect (the
+  // react-hooks/set-state-in-effect rule).
+  const [loadedPage, setLoadedPage] = useState(-1);
   const [stats, setStats] = useState<ScanStatsDto | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sortKey, setSortKey] = useState<SortKey>("size");
@@ -41,48 +44,54 @@ export function ResultsView({ scanId, onBack }: Props) {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [showRecovery, setShowRecovery] = useState(false);
+  const [statsVersion, setStatsVersion] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
-  const loadPage = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await invoke<ListResultsResponse>("list_results", {
-        req: {
-          scan_id: scanId,
-          offset: page * PAGE_SIZE,
-          limit: PAGE_SIZE,
-          extension_filter: null,
-        },
-      });
-      setItems(res.items);
-      setTotal(res.total);
-      setSpilled(res.spilled);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [scanId, page]);
-
-  const loadStats = useCallback(async () => {
-    try {
-      const res = await invoke<{ stats: ScanStatsDto }>("scan_stats", {
-        req: { scan_id: scanId },
-      });
-      setStats(res.stats);
-    } catch (e) {
-      setError(String(e));
-    }
-  }, [scanId]);
+  const loading = loadedPage !== page;
 
   useEffect(() => {
-    loadPage();
-  }, [loadPage]);
+    if (loadedPage === page) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await invoke<ListResultsResponse>("list_results", {
+          req: {
+            scan_id: scanId,
+            offset: page * PAGE_SIZE,
+            limit: PAGE_SIZE,
+            extension_filter: null,
+          },
+        });
+        if (cancelled) return;
+        setItems(res.items);
+        setTotal(res.total);
+        setSpilled(res.spilled);
+        setLoadedPage(page);
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scanId, page, loadedPage]);
 
   useEffect(() => {
-    loadStats();
-  }, [loadStats]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await invoke<{ stats: ScanStatsDto }>("scan_stats", {
+          req: { scan_id: scanId },
+        });
+        if (!cancelled) setStats(res.stats);
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scanId, statsVersion]);
 
   // Sort + filter (client-side within the loaded page; server-side
   // filtering arrives with the query API).
@@ -204,7 +213,9 @@ export function ResultsView({ scanId, onBack }: Props) {
           entryIds={[...selected]}
           totalBytes={selectedBytes}
           onDone={() => {
-            loadStats();
+            // Re-aggregate: recovered files keep their entries, but the
+            // refresh keeps the overview honest after a partial recovery.
+            setStatsVersion((v) => v + 1);
           }}
           onClose={() => setShowRecovery(false)}
         />
