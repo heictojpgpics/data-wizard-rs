@@ -13,7 +13,6 @@
 #![cfg(windows)]
 #![allow(unsafe_code)]
 
-use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
@@ -38,7 +37,7 @@ unsafe impl Send for SendHandle {}
 unsafe impl Sync for SendHandle {}
 
 pub struct WindowsRawSource {
-    handle: Mutex<SendHandle>,
+    handle: Arc<Mutex<SendHandle>>,
     size: u64,
     geometry: DiskGeometry,
 }
@@ -82,18 +81,17 @@ impl WindowsRawSource {
             cylinders: 0,
         };
         Ok(Self {
-            handle: Mutex::new(SendHandle(handle)),
+            handle: Arc::new(Mutex::new(SendHandle(handle))),
             size,
             geometry,
         })
     }
 }
 
-impl Drop for WindowsRawSource {
+impl Drop for SendHandle {
     fn drop(&mut self) {
-        let h = self.handle.lock();
-        if !h.0.is_invalid() {
-            let _ = unsafe { CloseHandle(h.0) };
+        if !self.0.is_invalid() {
+            let _ = unsafe { CloseHandle(self.0) };
         }
     }
 }
@@ -159,6 +157,50 @@ impl DiskSource for WindowsRawSource {
     }
 
     fn as_read_at(&self) -> Arc<dyn ReadAt> {
-        unimplemented!("callers should hold their own Arc<WindowsRawSource>")
+        Arc::new(WindowsRawReadAt {
+            handle: Arc::clone(&self.handle),
+            size: self.size,
+        })
+    }
+}
+
+/// Read handle sharing the source's device handle (see
+/// FileBackedReadAt). Closes the handle when the last owner goes away
+/// (SendHandle's Drop).
+pub struct WindowsRawReadAt {
+    handle: Arc<Mutex<SendHandle>>,
+    size: u64,
+}
+
+impl ReadAt for WindowsRawReadAt {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> DiskResult<()> {
+        if offset.saturating_add(buf.len() as u64) > self.size {
+            return Err(DiskError::OutOfRange {
+                offset,
+                len: buf.len() as u64,
+                source_size: self.size,
+            });
+        }
+        let h = self.handle.lock();
+        // SAFETY: identical call sequence to WindowsRawSource::read_at.
+        let ok = unsafe { SetFilePointerEx(h.0, offset as i64, None, FILE_BEGIN) };
+        if ok.is_err() {
+            return Err(DiskError::Windows(format!(
+                "SetFilePointerEx to {offset} failed"
+            )));
+        }
+        let mut bytes_read: u32 = 0;
+        let ok = unsafe { ReadFile(h.0, Some(buf), Some(&mut bytes_read), None) };
+        if ok.is_err() || bytes_read as usize != buf.len() {
+            return Err(DiskError::Windows(format!(
+                "ReadFile at offset {offset} got {bytes_read} of {} bytes",
+                buf.len()
+            )));
+        }
+        Ok(())
+    }
+
+    fn size(&self) -> u64 {
+        self.size
     }
 }
