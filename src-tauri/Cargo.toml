@@ -1,7 +1,8 @@
 # Standalone workspace root: this package is deliberately outside the
 # library workspace (it pulls the Tauri 2 tree, which would break the
-# light-weight lib CI jobs). Builds:
-#   cd src-tauri && cargo build --release --example scan_volume
+# light-weight lib CI jobs). The CLI for scanning images/volumes is
+# `dw-scantool` (bin `dw-scan`) in the main workspace; this crate is the
+# GUI shell only.
 #
 # NOTE: the workspace dependencies table below is a synchronized copy of
 # the root workspace's table (keep both in sync).

@@ -54,7 +54,7 @@ fixtures and real volumes before the matrix changes.
 | UI | React 19 + TypeScript + Vite + Tailwind 4 | Fast HMR, modern, small bundle |
 | Window | Tauri 2 + WebView2 | No Electron bloat; native webview |
 | Build / release | `cargo` + `tauri build` | Outputs MSI + NSIS + portable ZIP |
-| CI | GitHub Actions (Windows runners) | See [`data-wizard-ci`](https://github.com/heictojpgpics/data-wizard-ci) |
+| CI | GitHub Actions (Windows runners) | Workflows in `.github/workflows/` (Build and Test, Security Scan, Nightly Verification, Fuzz, Benchmarks) |
 
 ## Repository layout
 

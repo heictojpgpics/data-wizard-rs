@@ -22,3 +22,5 @@ name = "fuzz_direntry_parse"
 path = "fuzz_targets/fuzz_direntry_parse.rs"
 test = false
 doc = false
+
+[workspace]

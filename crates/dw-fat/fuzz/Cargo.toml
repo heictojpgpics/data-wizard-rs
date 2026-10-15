@@ -28,3 +28,5 @@ name = "fuzz_fat_table"
 path = "fuzz_targets/fuzz_fat_table.rs"
 test = false
 doc = false
+
+[workspace]

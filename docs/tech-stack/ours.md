@@ -65,15 +65,14 @@ Deliberately NOT using:
 | Component | Choice | Version |
 |---|---|---|
 | Build | cargo + tauri build | latest |
-| Release targets | MSI + NSIS + portable ZIP | Tauri's bundlers |
-| MSIX | planned for later | Tauri's MSIX bundler |
-| Code signing | planned | signtool.exe with EV cert |
+| Release targets | MSI + NSIS + MSIX + portable ZIP | Tauri bundlers + MakeAppx |
+| Code signing | self-signed CI cert (real cert later) | signtool.exe |
 
 ## CI / verification
 
 | Component | Choice | Why |
 |---|---|---|
-| Runner | `windows-2022` GitHub Actions | Microsoft-hosted, latest Windows Server |
+| Runner | `windows-latest` GitHub Actions | Microsoft-hosted, current Windows Server |
 | Rust cache | Swatinem/rust-cache@v2 | Saves ~5 min on every build |
 | npm cache | setup-node@v5 cache | Saves ~30 sec |
 | Artifacts | upload-artifact@v4 | 14-day retention for builds, 90-day for releases |
@@ -81,9 +80,9 @@ Deliberately NOT using:
 | Security scan | cargo-audit + winchecksec | Every PR |
 | Lint | clippy + eslint | Every PR, deny warnings |
 
-See [`data-wizard-ci`](https://github.com/heictojpgpics/data-wizard-ci) for
-the verification repo (separate to keep build logs isolated from the
-source repo).
+All verification workflows run in this repository under `.github/workflows/`
+(including the Windows build matrix that previously lived in a separate
+verification repo).
 
 ## Dependency policy
 

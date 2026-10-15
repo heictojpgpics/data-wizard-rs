@@ -45,4 +45,4 @@ MSR, Windows recovery, Linux RAID/LVM/swap).
   discovery; volumes (drive letters) kept as directly-scannable entries.
 
 Validated on the msvc target via cross-check (0 errors); runtime
-verification runs on the Windows CI (data-wizard-ci).
+verification runs in the Nightly Verification workflow (this repo).

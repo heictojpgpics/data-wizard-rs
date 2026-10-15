@@ -1,0 +1,269 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main, draft]
+  pull_request:
+    branches: [main, draft]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+  CARGO_INCREMENTAL: 0
+
+concurrency:
+  group: build-and-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows-release:
+    name: Build Windows release
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # The Tauri app is a separate workspace under src-tauri; cache its
+          # target dir alongside the library workspace.
+          cache-directories: |
+            src-tauri/target
+
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI deps (locked)
+        working-directory: ui
+        run: npm ci
+
+      - name: Build UI (lint + typecheck + bundle)
+        working-directory: ui
+        run: |
+          npm run lint --if-present
+          npx tsc --noEmit
+          npm run build
+
+      - name: Rustfmt check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --no-fail-fast
+
+      - name: Build release (library workspace)
+        run: cargo build --workspace --release
+
+      # NOTE: tauri-cli MUST be installed with default features. The HTTP
+      # client it uses to fetch WiX/NSIS needs a TLS backend; a previous
+      # --no-default-features install produced
+      # "TLS required, but transport is unsecured" at bundle time.
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build Tauri bundle (MSI + NSIS)
+        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles msi,nsis
+
+      - name: Package MSIX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $release = "src-tauri\target\x86_64-pc-windows-msvc\release"
+          $out = Join-Path $release "bundle\msix"
+          New-Item -ItemType Directory -Force -Path "$out\assets" | Out-Null
+          Copy-Item "$release\dw-tauri.exe" -Destination "$out\dw-tauri.exe" -Force
+
+          # --- App identity constants (Publisher must match cert subject) ---
+          $publisher = "CN=Data Wizard CI"
+          $identity   = "DataWizard"
+          # Derive from tauri.conf.json so the MSIX version tracks the app.
+          $conf = Get-Content src-tauri\tauri.conf.json -Raw | ConvertFrom-Json
+          $semver = $conf.version
+          $version = "$semver.0"
+
+          # --- Generate scale-200 logo assets from the repo icon ---
+          Add-Type -AssemblyName System.Drawing
+          function Save-Icon([int]$size, [string]$file) {
+            $src = [System.Drawing.Image]::FromFile("$PWD\src-tauri\icons\icon.png")
+            $bmp = New-Object System.Drawing.Bitmap $size, $size
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.DrawImage($src, 0, 0, $size, $size)
+            $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose(); $src.Dispose()
+          }
+          Save-Icon 88  "$out\assets\Square44x44Logo.scale-200.png"
+          Save-Icon 300 "$out\assets\Square150x150Logo.scale-200.png"
+          Save-Icon 50  "$out\assets\StoreLogo.png"
+
+          # --- AppxManifest (single-sourced identity: publisher/identity/version) ---
+          $manifest = @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <Package
+            xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+            xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+            xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
+            <Identity Name="$identity" ProcessorArchitecture="x64" Publisher="$publisher" Version="$version" />
+            <Properties>
+              <DisplayName>Data Wizard</DisplayName>
+              <PublisherDisplayName>Data Wizard Project</PublisherDisplayName>
+              <Logo>assets\StoreLogo.png</Logo>
+            </Properties>
+            <Dependencies>
+              <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+            </Dependencies>
+            <Capabilities>
+              <rescap:Capability Name="runFullTrust" />
+            </Capabilities>
+            <Applications>
+              <Application Id="DataWizard" Executable="dw-tauri.exe" EntryPoint="Windows.FullTrustProcess">
+                <uap:VisualElements
+                  DisplayName="Data Wizard"
+                  Description="Free and open-source data recovery for Windows."
+                  BackgroundColor="#09090b"
+                  Square150x150Logo="assets\Square150x150Logo.scale-200.png"
+                  Square44x44Logo="assets\Square44x44Logo.scale-200.png" />
+              </Application>
+            </Applications>
+          </Package>
+          "@
+          $manifest | Set-Content "$out\AppxManifest.xml" -Encoding utf8
+
+          # --- MakeAppx ---
+          $sdk = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64" |
+            Sort-Object { [version]$_.Directory.Name } -Descending | Select-Object -First 1
+          $makeappx = Join-Path $sdk.FullName "makeappx.exe"
+          $signtool  = Join-Path $sdk.FullName "signtool.exe"
+          if (-not (Test-Path $makeappx)) { throw "makeappx.exe not found under Windows Kits" }
+          & $makeappx pack /o /h SHA256 /d $out /p "$out\DataWizard.msix"
+          if ($LASTEXITCODE -ne 0) { throw "makeappx failed: $LASTEXITCODE" }
+
+          # --- Code-signing cert (self-signed, exported for testers) ---
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $publisher `
+            -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Disposable `
+            -NotAfter (Get-Date).AddYears(2)
+          Export-Certificate -Cert $cert -FilePath "$out\DataWizard-Test.cer" | Out-Null
+          & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint "$out\DataWizard.msix"
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed: $LASTEXITCODE" }
+
+          @'
+          Installing the MSIX (test builds are signed with a self-signed CI cert)
+          1. Right-click DataWizard-Test.cer -> Install Certificate -> Local Machine ->
+             Place all certificates in Trusted People. (Or as admin:
+             Import-Certificate -FilePath .\DataWizard-Test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople)
+          2. Double-click DataWizard.msix, or in PowerShell:
+             Add-AppxPackage .\DataWizard.msix
+          3. Launch "Data Wizard" from the Start menu.
+          '@ | Set-Content "$out\README-MSIX.txt" -Encoding utf8
+          Write-Host "MSIX packaged: $out\DataWizard.msix"
+
+      - name: Build portable ZIP
+        shell: pwsh
+        run: |
+          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
+          if (-not (Test-Path $exe)) { throw "portable exe missing: $exe" }
+          $zip = "data-wizard-${{ github.sha }}-windows-portable.zip"
+          Compress-Archive -Path $exe -DestinationPath $zip
+          Write-Host "Zip: $zip"
+
+      - name: Test MSI install / launch / uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Get-ChildItem "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi" |
+            Select-Object -First 1
+          if (-not $msi) { throw "no MSI produced" }
+          Write-Host "Testing MSI: $($msi.FullName)"
+
+          $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart /l*v msi-install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "MSI install failed: $($p.ExitCode)" }
+
+          $key = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" |
+            Get-ItemProperty | Where-Object { $_.DisplayName -like "*Data Wizard*" }
+          if (-not $key) { throw "MSI did not register an uninstall entry" }
+          $loc = $key.InstallLocation
+          Write-Host "Installed to: $loc"
+          $exe = Join-Path $loc "dw-tauri.exe"
+          if (-not (Test-Path $exe)) { throw "installed exe missing at $exe" }
+
+          # Launch smoke: the app must start and stay up.
+          $app = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 10
+          if ($app.HasExited) { throw "app exited immediately (code $($app.ExitCode))" }
+          Stop-Process -Id $app.Id -Force
+          Write-Host "Launch smoke passed"
+
+          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart /l*v msi-uninstall.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "MSI uninstall failed: $($p.ExitCode)" }
+          if (Test-Path $exe) { throw "exe still present after uninstall" }
+          Write-Host "MSI install/launch/uninstall: PASS"
+
+      - name: Test MSIX install / removal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msix = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\DataWizard.msix"
+          $cer  = "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\DataWizard-Test.cer"
+          if (-not (Test-Path $msix)) { throw "MSIX missing" }
+          Import-Certificate -FilePath $cer -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" | Out-Null
+          Add-AppxPackage -Path $msix
+          $pkg = Get-AppxPackage -Name DataWizard
+          if (-not $pkg) { throw "MSIX did not install" }
+          Write-Host "MSIX installed to: $($pkg.InstallLocation)"
+          if (-not (Test-Path (Join-Path $pkg.InstallLocation "dw-tauri.exe"))) {
+            throw "MSIX install dir missing dw-tauri.exe"
+          }
+          Remove-AppxPackage -Package $pkg.PackageFullName
+          if (Get-AppxPackage -Name DataWizard) { throw "MSIX still present after removal" }
+          Write-Host "MSIX install/removal: PASS"
+
+      - name: Upload MSI
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload NSIS
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload MSIX
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msix
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msix/DataWizard.msix
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msix/DataWizard-Test.cer
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msix/README-MSIX.txt
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload portable ZIP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: data-wizard-*-windows-portable.zip
+          retention-days: 14
+          if-no-files-found: error

@@ -47,37 +47,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --no-fail-fast
 
-  build-windows:
-    name: Build (Windows)
-    runs-on: windows-2022
-    needs: [fmt, clippy]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
-      - name: Build Rust workspace (release)
-        run: cargo build --workspace --release
-      - name: Upload release artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-build
-          path: |
-            target/release/*.exe
-            target/release/*.dll
-          retention-days: 14
-
-  test-windows:
-    name: Test (Windows)
-    runs-on: windows-2022
-    needs: [fmt, clippy]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace --no-fail-fast
-
   build-ui:
     name: Build UI
     runs-on: ubuntu-24.04
@@ -87,29 +56,22 @@ jobs:
       - name: Install Node
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
-      - name: Install UI deps
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+      - name: Install UI deps (locked)
         working-directory: ui
-        run: npm install
-      - name: Build UI
+        run: npm ci
+      - name: Lint + typecheck + build
         working-directory: ui
-        run: npm run build
+        run: |
+          npm run lint --if-present
+          npx tsc --noEmit
+          npm run build
       - name: Upload UI dist
         uses: actions/upload-artifact@v4
         with:
           name: ui-dist
           path: ui/dist/
           retention-days: 14
-
-  dispatch-verification:
-    name: Dispatch to data-wizard-ci
-    runs-on: ubuntu-24.04
-    needs: [fmt, clippy, test-linux]
-    steps:
-      - name: Trigger repository_dispatch on data-wizard-ci
-        run: |
-          curl -s -X POST \
-            -H "Authorization: token ${{ secrets.CI_DISPATCH_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/heictojpgpics/data-wizard-ci/dispatches \
-            -d '{"event_type":"data-wizard-rs-push","client_payload":{"ref":"'"${{ github.event.pull_request.head.ref || github.ref_name }}"'","sha":"'"${{ github.sha }}"'"}}'
+          if-no-files-found: error
