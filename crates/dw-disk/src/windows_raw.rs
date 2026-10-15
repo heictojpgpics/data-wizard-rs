@@ -23,8 +23,8 @@ use bytes::Bytes;
 use parking_lot::Mutex;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileSizeEx,
-    OPEN_EXISTING, ReadFile, SetFilePointerEx,
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    GetFileSizeEx, OPEN_EXISTING, ReadFile, SetFilePointerEx,
 };
 use windows::core::PCWSTR;
 
@@ -116,11 +116,10 @@ impl ReadAt for WindowsRawSource {
         }
 
         // Set the file pointer to the desired offset.
-        // SAFETY: SetFilePointerEx takes a valid HANDLE and a signed 64-bit
-        // offset. We pass 0 as the distance to move high pointer since we
-        // don't need it.
+        // SAFETY: SetFilePointerEx takes a valid HANDLE, a signed 64-bit
+        // offset, an optional output pointer, and a move method.
         let pos = offset as i64;
-        let ok = unsafe { SetFilePointerEx(h.0, pos, None, 0) }; // FILE_BEGIN = 0
+        let ok = unsafe { SetFilePointerEx(h.0, pos, None, FILE_BEGIN) };
         if ok.is_err() {
             return Err(DiskError::Windows(format!(
                 "SetFilePointerEx to {offset} failed"
@@ -129,10 +128,10 @@ impl ReadAt for WindowsRawSource {
 
         // Read synchronously (no OVERLAPPED).
         let mut bytes_read: u32 = 0;
-        // SAFETY: ReadFile takes a valid HANDLE, a writable buffer, and a
-        // pointer to receive bytes read. We pass None for OVERLAPPED to
-        // do a synchronous read at the current file position.
-        let ok = unsafe { ReadFile(h.0, Some(buf), &mut bytes_read, None) };
+        // SAFETY: ReadFile takes a valid HANDLE, a writable buffer, an
+        // optional pointer to receive bytes read, and an optional
+        // OVERLAPPED pointer. We pass None for OVERLAPPED (synchronous).
+        let ok = unsafe { ReadFile(h.0, Some(buf), Some(&mut bytes_read), None) };
         if ok.is_err() || bytes_read as usize != buf.len() {
             return Err(DiskError::Windows(format!(
                 "ReadFile at offset {offset} got {bytes_read} of {} bytes",
