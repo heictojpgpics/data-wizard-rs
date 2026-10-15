@@ -80,7 +80,7 @@ impl DiscoveredTable {
     /// Convert to the canonical geometry representation used by the app.
     pub fn into_geometry(self) -> crate::geometry::PartitionTable {
         use crate::geometry::{
-            Partition, PartitionFsHint, PartitionTable as GeoTable, PartitionType,
+            Partition, PartitionTable as GeoTable, PartitionType,
         };
 
         let (kind, raw): (PartitionType, Vec<PartitionEntry>) = match self {
