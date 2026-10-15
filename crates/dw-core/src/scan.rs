@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
+    CoreError, CoreResult,
     plugin::{FsPlugin, ScanMode},
     progress::ProgressSink,
     results::ResultsStore,
-    CoreError, CoreResult,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,8 +95,16 @@ pub struct Scan {
 
 impl Scan {
     #[must_use]
-    pub fn new(handle: ScanHandle, plugins: Vec<Arc<dyn FsPlugin>>, progress: Arc<dyn ProgressSink>) -> Self {
-        Self { handle, plugins, progress }
+    pub fn new(
+        handle: ScanHandle,
+        plugins: Vec<Arc<dyn FsPlugin>>,
+        progress: Arc<dyn ProgressSink>,
+    ) -> Self {
+        Self {
+            handle,
+            plugins,
+            progress,
+        }
     }
 
     /// Run the scan to completion (or until cancelled by dropping the
@@ -108,7 +116,7 @@ impl Scan {
         // to raw carving if no plugin claims the region. The per-plugin
         // implementations are stubbed for now and will be filled in as
         // each FS-parser crate is built out.
-        let _ = self.plugins.iter().count();
+        let _ = self.plugins.len();
         self.handle.set_state(ScanState::Done);
         Ok(())
     }

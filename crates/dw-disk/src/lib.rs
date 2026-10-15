@@ -17,5 +17,7 @@ pub mod source;
 pub mod windows_raw;
 
 pub use error::{DiskError, DiskResult};
-pub use geometry::{DiskGeometry, Partition, PartitionFsHint, PartitionTable, PartitionType, SectorSize};
+pub use geometry::{
+    DiskGeometry, Partition, PartitionFsHint, PartitionTable, PartitionType, SectorSize,
+};
 pub use source::{DiskSource, FileBackedSource, ReadAt};

@@ -39,7 +39,9 @@ pub struct SignatureDb {
 impl SignatureDb {
     #[must_use]
     pub fn new() -> Self {
-        Self { signatures: Vec::new() }
+        Self {
+            signatures: Vec::new(),
+        }
     }
 
     pub fn push(&mut self, sig: Signature) -> SignatureId {

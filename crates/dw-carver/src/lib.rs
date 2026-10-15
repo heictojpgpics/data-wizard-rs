@@ -32,12 +32,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod header_footer;
 pub mod bifragment;
-pub mod structured;
-pub mod fragment;
-pub mod plan;
 pub mod error;
+pub mod fragment;
+pub mod header_footer;
+pub mod plan;
+pub mod structured;
 
 pub use error::{CarverError, CarverResult};
-pub use plan::{CarvePlan, CarveParams, CarveStrategy};
+pub use plan::{CarveParams, CarvePlan, CarveStrategy};

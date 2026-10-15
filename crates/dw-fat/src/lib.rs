@@ -26,10 +26,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod bpb;
-pub mod fat;
 pub mod direntry;
-pub mod plugin;
 pub mod error;
+pub mod fat;
+pub mod plugin;
 
 pub use error::{FatError, FatResult};
 pub use plugin::FatPlugin;

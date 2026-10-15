@@ -1,20 +1,26 @@
 //! FsPlugin impl stub. To be filled in with real parser logic.
 
-use std::sync::Arc;
 use async_trait::async_trait;
-use dw_core::{FsPlugin, ProbeOutcome, ScanMode, ProgressSink, ResultsStore, CoreResult};
+use dw_core::{CoreResult, FsPlugin, ProbeOutcome, ProgressSink, ResultsStore, ScanMode};
 use dw_disk::DiskSource;
+use std::sync::Arc;
 
 pub struct ZfsPlugin;
 
 impl Default for ZfsPlugin {
-    fn default() -> Self { Self }
+    fn default() -> Self {
+        Self
+    }
 }
 
 #[async_trait]
 impl FsPlugin for ZfsPlugin {
-    fn id(&self) -> &'static str { "zfs" }
-    fn name(&self) -> &'static str { "ZFS parser (stub)" }
+    fn id(&self) -> &'static str {
+        "zfs"
+    }
+    fn name(&self) -> &'static str {
+        "ZFS parser (stub)"
+    }
     async fn probe(&self, _source: &dyn DiskSource) -> CoreResult<ProbeOutcome> {
         // TODO: real probe logic
         Ok(ProbeOutcome::No)

@@ -15,12 +15,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use parking_lot::Mutex;
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::OVERLAPPED;
+use windows::core::PCWSTR;
 
 use crate::source::{DiskSource, ReadAt};
 use crate::{DiskError, DiskGeometry, DiskResult};

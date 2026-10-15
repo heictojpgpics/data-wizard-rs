@@ -2,9 +2,11 @@
 //!
 //! ReFS filesystem parser plugin for `data-wizard-rs`.
 //!
-//! Recovery strategy (clean-room, derived from Microsoft ReFS documentation
-//! + the `refs` source available in the Windows Driver Kit samples + the
+//! Recovery strategy (clean-room, derived from Microsoft ReFS documentation,
+//! the `refs` source available in the Windows Driver Kit samples, and the
 //! open-source `refsfs` reverse-engineering notes):
+//!
+//! Note: ReFS is a moving target — we target v3.x.
 //!
 //!  1. **Probe**: Read the ReFS boot sector at offset 0; verify the
 //!     "ReFS" OEM magic. Parse the super-block located at offset 0xC00
@@ -28,11 +30,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod boot;
-pub mod superblock;
-pub mod object;
 pub mod btree;
-pub mod plugin;
 pub mod error;
+pub mod object;
+pub mod plugin;
+pub mod superblock;
 
 pub use error::{RefsError, RefsResult};
 pub use plugin::RefsPlugin;

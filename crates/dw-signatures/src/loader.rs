@@ -60,7 +60,8 @@ fn parse_compiled(bytes: &[u8]) -> SignaturesResult<SignatureDb> {
         if p + 6 > bytes.len() {
             return Err(SignaturesError::Corrupt("hdr offset/len".into()));
         }
-        let header_offset = u32::from_le_bytes([bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]]);
+        let header_offset =
+            u32::from_le_bytes([bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]]);
         p += 4;
         let header_len = u16::from_le_bytes([bytes[p], bytes[p + 1]]) as usize;
         p += 2;
@@ -72,7 +73,8 @@ fn parse_compiled(bytes: &[u8]) -> SignaturesResult<SignatureDb> {
         if p + 6 > bytes.len() {
             return Err(SignaturesError::Corrupt("tail offset/len".into()));
         }
-        let tail_offset_from_end = u32::from_le_bytes([bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]]);
+        let tail_offset_from_end =
+            u32::from_le_bytes([bytes[p], bytes[p + 1], bytes[p + 2], bytes[p + 3]]);
         p += 4;
         let tail_len = u16::from_le_bytes([bytes[p], bytes[p + 1]]) as usize;
         p += 2;

@@ -48,9 +48,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod db;
+pub mod error;
 pub mod loader;
 pub mod matcher;
-pub mod error;
 
 pub use db::{Signature, SignatureDb, SignatureId};
 pub use error::{SignaturesError, SignaturesResult};

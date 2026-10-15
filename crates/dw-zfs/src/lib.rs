@@ -25,12 +25,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod label;
-pub mod uberblock;
-pub mod mos;
 pub mod dnode;
-pub mod plugin;
 pub mod error;
+pub mod label;
+pub mod mos;
+pub mod plugin;
+pub mod uberblock;
 
 pub use error::{ZfsError, ZfsResult};
 pub use plugin::ZfsPlugin;

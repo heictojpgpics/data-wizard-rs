@@ -29,12 +29,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod boot;
-pub mod mft;
 pub mod attribute;
-pub mod index;
-pub mod plugin;
+pub mod boot;
 pub mod error;
+pub mod index;
+pub mod mft;
+pub mod plugin;
 
 pub use error::{NtfsError, NtfsResult};
 pub use plugin::NtfsPlugin;

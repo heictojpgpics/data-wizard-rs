@@ -22,12 +22,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod superblock;
 pub mod chunk;
-pub mod root;
+pub mod error;
 pub mod fs_tree;
 pub mod plugin;
-pub mod error;
+pub mod root;
+pub mod superblock;
 
 pub use error::{BtrfsError, BtrfsResult};
 pub use plugin::BtrfsPlugin;

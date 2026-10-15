@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use dw_disk::DiskSource;
 use serde::{Deserialize, Serialize};
 
-use crate::{progress::ProgressSink, results::ResultsStore, CoreResult};
+use crate::{CoreResult, progress::ProgressSink, results::ResultsStore};
 
 /// What the probe pass discovered about a given disk region.
 #[derive(Debug, Clone, Serialize, Deserialize)]

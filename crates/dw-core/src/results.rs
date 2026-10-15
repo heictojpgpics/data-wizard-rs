@@ -62,6 +62,8 @@ pub enum RecoveryStatus {
 pub struct ResultsStore {
     capacity: usize,
     inner: RwLock<Inner>,
+    /// Reserved for the spill-to-disk path (not yet implemented).
+    #[allow(dead_code)]
     spill_path: Option<PathBuf>,
 }
 

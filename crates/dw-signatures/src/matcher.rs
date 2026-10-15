@@ -1,6 +1,6 @@
 //! Streaming matcher: given a window of bytes, find all signature hits.
 
-use crate::{Signature, SignatureDb};
+use crate::SignatureDb;
 
 #[derive(Debug, Clone)]
 pub struct MatchResult {
@@ -32,7 +32,10 @@ impl<'a> Matcher<'a> {
             }
             let mut search_start = 0usize;
             let needle = &sig.header_magic[..];
-            while let Some(rel) = window[search_start..].windows(needle.len()).position(|w| w == needle) {
+            while let Some(rel) = window[search_start..]
+                .windows(needle.len())
+                .position(|w| w == needle)
+            {
                 let abs = window_base_offset + (search_start + rel) as u64;
                 if abs >= u64::from(sig.header_offset) {
                     let header_pos = abs - u64::from(sig.header_offset);

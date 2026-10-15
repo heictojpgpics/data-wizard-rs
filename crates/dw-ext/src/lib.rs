@@ -24,13 +24,13 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod superblock;
+pub mod error;
+pub mod extent;
 pub mod group;
 pub mod inode;
-pub mod extent;
 pub mod journal;
 pub mod plugin;
-pub mod error;
+pub mod superblock;
 
 pub use error::{ExtError, ExtResult};
 pub use plugin::ExtPlugin;

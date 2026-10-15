@@ -24,12 +24,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod boot;
-pub mod fat;
-pub mod direntry;
 pub mod bitmap;
-pub mod plugin;
+pub mod boot;
+pub mod direntry;
 pub mod error;
+pub mod fat;
+pub mod plugin;
 
 pub use error::{ExfatError, ExfatResult};
 pub use plugin::ExfatPlugin;

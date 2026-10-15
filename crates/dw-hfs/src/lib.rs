@@ -23,12 +23,12 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-pub mod volumeheader;
 pub mod btree;
 pub mod catalog;
+pub mod error;
 pub mod extents;
 pub mod plugin;
-pub mod error;
+pub mod volumeheader;
 
 pub use error::{HfsError, HfsResult};
 pub use plugin::HfsPlugin;
