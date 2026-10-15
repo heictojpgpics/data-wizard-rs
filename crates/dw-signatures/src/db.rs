@@ -2,34 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::spec::{Signature, SignatureSpec};
+
 /// Stable ID into the loaded database.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SignatureId(pub u32);
-
-/// One entry in the signature DB.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Signature {
-    pub id: SignatureId,
-    /// Lowercase extension without leading dot, e.g. `"pdf"`.
-    pub extension: String,
-    /// MIME type if known, e.g. `"application/pdf"`.
-    pub mime: Option<String>,
-    /// Offset where the header magic is expected.
-    pub header_offset: u32,
-    /// Header magic bytes.
-    pub header_magic: Vec<u8>,
-    /// Offset from END of file where tail magic is expected (0 = no tail).
-    pub tail_offset_from_end: u32,
-    /// Tail magic bytes (empty if no tail).
-    pub tail_magic: Vec<u8>,
-    /// Minimum file size to accept a match.
-    pub min_size: u64,
-    /// Maximum file size (0 = unlimited).
-    pub max_size: u64,
-    /// Confidence weight 0..=1000.
-    pub weight: u16,
-}
 
 /// In-memory signature DB.
 pub struct SignatureDb {
@@ -44,9 +22,8 @@ impl SignatureDb {
         }
     }
 
-    pub fn push(&mut self, sig: Signature) -> SignatureId {
+    pub fn push(&mut self, mut sig: Signature) -> SignatureId {
         let id = SignatureId(self.signatures.len() as u32);
-        let mut sig = sig;
         sig.id = id;
         self.signatures.push(sig);
         id
@@ -61,10 +38,94 @@ impl SignatureDb {
     pub fn is_empty(&self) -> bool {
         self.signatures.is_empty()
     }
+
+    /// Build the database from the compile-time-embedded signatures.
+    ///
+    /// This is the primary constructor. The signatures are compiled from
+    /// the TOML files under `assets/public-signatures/` at build time
+    /// by `build.rs`.
+    #[must_use]
+    pub fn from_embedded() -> Self {
+        let mut db = Self::new();
+        for spec in SIGNATURES {
+            db.push(Signature::from(spec));
+        }
+        db
+    }
 }
 
 impl Default for SignatureDb {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// Include the auto-generated signatures from build.rs.
+// This provides `SIGNATURES: &[SignatureSpec]`.
+include!(concat!(env!("OUT_DIR"), "/signatures_gen.rs"));
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedded_signatures_load() {
+        let db = SignatureDb::from_embedded();
+        assert!(
+            db.len() > 10,
+            "expected at least 10 embedded signatures, got {}",
+            db.len()
+        );
+    }
+
+    #[test]
+    fn embedded_signatures_have_extensions() {
+        let db = SignatureDb::from_embedded();
+        for sig in &db.signatures {
+            assert!(
+                !sig.extension.is_empty(),
+                "signature with source '{}' has empty extension",
+                sig.source
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_signatures_have_header_magic() {
+        let db = SignatureDb::from_embedded();
+        for sig in &db.signatures {
+            assert!(
+                !sig.header_magic.is_empty(),
+                "signature '{}' has empty header_magic",
+                sig.extension
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_signatures_have_sources() {
+        let db = SignatureDb::from_embedded();
+        for sig in &db.signatures {
+            assert!(
+                !sig.source.is_empty(),
+                "signature '{}' has empty source citation",
+                sig.extension
+            );
+        }
+    }
+
+    #[test]
+    fn embedded_signatures_include_known_formats() {
+        let db = SignatureDb::from_embedded();
+        let extensions: std::collections::HashSet<&str> =
+            db.signatures.iter().map(|s| s.extension.as_str()).collect();
+
+        // Verify a representative set of formats are present.
+        for expected in ["jpg", "png", "pdf", "zip", "exe", "sqlite"] {
+            assert!(
+                extensions.contains(expected),
+                "expected '.{expected}' in embedded signatures"
+            );
+        }
     }
 }

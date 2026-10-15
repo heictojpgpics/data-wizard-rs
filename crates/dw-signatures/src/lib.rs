@@ -51,8 +51,10 @@ pub mod db;
 pub mod error;
 pub mod loader;
 pub mod matcher;
+pub mod spec;
 
-pub use db::{Signature, SignatureDb, SignatureId};
+pub use db::{SignatureDb, SignatureId};
 pub use error::{SignaturesError, SignaturesResult};
 pub use loader::build_db_from_sources;
 pub use matcher::{MatchResult, Matcher};
+pub use spec::{MagicByte, Signature, SignatureSpec};

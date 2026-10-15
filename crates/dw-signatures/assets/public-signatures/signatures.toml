@@ -1,0 +1,453 @@
+# Public-source file signatures for data-wizard-rs.
+#
+# This file is part of the dw-signatures crate. Every signature here is
+# derived from a PUBLIC source — no proprietary data is used.
+#
+# Sources:
+# - Gary Kessler's GCF "File Signatures Table" (https://www.garykessler.net/software/filemountains.txt)
+# - NIST DFXML (https://github.com/dfxml-working-group/dfxml_schema)
+# - Wikipedia "List of file signatures" (https://en.wikipedia.org/wiki/List_of_file_signatures)
+# - libmagic (https://github.com/file/file)
+#
+# Each signature has a `source` field citing where the magic came from.
+#
+# Format: TOML array of tables. Fields:
+#   extension      — file extension without leading dot, lowercase
+#   mime           — MIME type (optional)
+#   header_offset  — byte offset where header magic is expected
+#   header_magic   — hex bytes of header magic (space-separated)
+#   tail_offset    — offset from END of file where tail magic is expected (0 = no tail)
+#   tail_magic     — hex bytes of tail magic (omitted if tail_offset = 0)
+#   min_size       — minimum file size in bytes (0 = no minimum)
+#   max_size       — maximum file size in bytes (0 = unlimited)
+#   weight         — confidence weight 0..=1000 (higher = more confident)
+#   source         — citation for this signature
+
+# ===== Images =====
+
+[[signature]]
+extension = "jpg"
+mime = "image/jpeg"
+header_offset = 0
+header_magic = "FF D8 FF"
+tail_offset = 0
+tail_magic = "FF D9"
+min_size = 4
+max_size = 0
+weight = 990
+source = "GCF / Wikipedia: JPEG SOI (FF D8 FF) + EOI (FF D9)"
+
+[[signature]]
+extension = "png"
+mime = "image/png"
+header_offset = 0
+header_magic = "89 50 4E 47 0D 0A 1A 0A"
+tail_offset = 0
+tail_magic = "49 45 4E 44 AE 42 60 82"
+min_size = 8
+max_size = 0
+weight = 999
+source = "GCF / Wikipedia: PNG 8-byte signature + IEND chunk"
+
+[[signature]]
+extension = "gif"
+mime = "image/gif"
+header_offset = 0
+header_magic = "47 49 46 38"
+tail_offset = 0
+tail_magic = "3B"
+min_size = 6
+max_size = 0
+weight = 980
+source = "GCF: GIF87a/GIF89a header + trailer (0x3B)"
+
+[[signature]]
+extension = "bmp"
+mime = "image/bmp"
+header_offset = 0
+header_magic = "42 4D"
+tail_offset = 0
+min_size = 14
+max_size = 0
+weight = 800
+source = "GCF: BMP 'BM' magic"
+
+[[signature]]
+extension = "tif"
+mime = "image/tiff"
+header_offset = 0
+header_magic = "49 49 2A 00"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 950
+source = "GCF: TIFF little-endian (II*\\0)"
+
+[[signature]]
+extension = "tif"
+mime = "image/tiff"
+header_offset = 0
+header_magic = "4D 4D 00 2A"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 950
+source = "GCF: TIFF big-endian (MM\\0*)"
+
+[[signature]]
+extension = "webp"
+mime = "image/webp"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 57 45 42 50"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 970
+source = "GCF: RIFF....WEBP"
+
+[[signature]]
+extension = "heic"
+mime = "image/heic"
+header_offset = 4
+header_magic = "66 74 79 70 68 65 69 63"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 900
+source = "Wikipedia: HEIC ftyp box"
+
+# ===== Documents =====
+
+[[signature]]
+extension = "pdf"
+mime = "application/pdf"
+header_offset = 0
+header_magic = "25 50 44 46 2D"
+tail_offset = 0
+tail_magic = "25 25 45 4F 46"
+min_size = 64
+max_size = 0
+weight = 999
+source = "GCF / Wikipedia: PDF %PDF- header + %%EOF trailer"
+
+[[signature]]
+extension = "rtf"
+mime = "application/rtf"
+header_offset = 0
+header_magic = "7B 5C 72 74 66"
+tail_offset = 0
+min_size = 5
+max_size = 0
+weight = 980
+source = "GCF: RTF {\\rtf"
+
+[[signature]]
+extension = "doc"
+mime = "application/msword"
+header_offset = 0
+header_magic = "D0 CF 11 E0 A1 B1 1A E1"
+tail_offset = 0
+min_size = 512
+max_size = 0
+weight = 950
+source = "GCF: OLE2 Compound Document"
+
+[[signature]]
+extension = "xls"
+mime = "application/vnd.ms-excel"
+header_offset = 0
+header_magic = "D0 CF 11 E0 A1 B1 1A E1"
+tail_offset = 0
+min_size = 512
+max_size = 0
+weight = 850
+source = "GCF: OLE2 Compound Document (same magic as .doc — disambiguate via internal stream)"
+
+[[signature]]
+extension = "ppt"
+mime = "application/vnd.ms-powerpoint"
+header_offset = 0
+header_magic = "D0 CF 11 E0 A1 B1 1A E1"
+tail_offset = 0
+min_size = 512
+max_size = 0
+weight = 850
+source = "GCF: OLE2 Compound Document (same magic as .doc — disambiguate via internal stream)"
+
+# ===== Office Open XML (ZIP-based) =====
+
+[[signature]]
+extension = "docx"
+mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP PK\\x03\\x04 (docx is ZIP-based — use structured carving for positive ID)"
+
+[[signature]]
+extension = "xlsx"
+mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP PK\\x03\\x04 (xlsx is ZIP-based)"
+
+[[signature]]
+extension = "pptx"
+mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP PK\\x03\\x04 (pptx is ZIP-based)"
+
+# ===== Archives =====
+
+[[signature]]
+extension = "zip"
+mime = "application/zip"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 990
+source = "GCF: ZIP Local File Header"
+
+[[signature]]
+extension = "zip"
+mime = "application/zip"
+header_offset = 0
+header_magic = "50 4B 05 06"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 700
+source = "GCF: ZIP Empty Archive"
+
+[[signature]]
+extension = "rar"
+mime = "application/x-rar-compressed"
+header_offset = 0
+header_magic = "52 61 72 21 1A 07"
+tail_offset = 0
+min_size = 7
+max_size = 0
+weight = 999
+source = "GCF: Rar!\\x1a\\x07"
+
+[[signature]]
+extension = "7z"
+mime = "application/x-7z-compressed"
+header_offset = 0
+header_magic = "37 7A BC AF 27 1C"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 999
+source = "GCF: 7z\\xbc\\xaf\\x27\\x1c"
+
+[[signature]]
+extension = "gz"
+mime = "application/gzip"
+header_offset = 0
+header_magic = "1F 8B"
+tail_offset = 0
+min_size = 10
+max_size = 0
+weight = 980
+source = "GCF: gzip \\x1f\\x8b"
+
+[[signature]]
+extension = "bz2"
+mime = "application/x-bzip2"
+header_offset = 0
+header_magic = "42 5A 68"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 980
+source = "GCF: BZh"
+
+# ===== Audio =====
+
+[[signature]]
+extension = "mp3"
+mime = "audio/mpeg"
+header_offset = 0
+header_magic = "49 44 33"
+tail_offset = 0
+min_size = 10
+max_size = 0
+weight = 990
+source = "GCF: MP3 ID3v2"
+
+[[signature]]
+extension = "mp3"
+mime = "audio/mpeg"
+header_offset = 0
+header_magic = "FF FB"
+tail_offset = 0
+min_size = 2
+max_size = 0
+weight = 850
+source = "GCF: MP3 frame sync (FF FB)"
+
+[[signature]]
+extension = "wav"
+mime = "audio/wav"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 57 41 56 45"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 970
+source = "GCF: RIFF....WAVE"
+
+[[signature]]
+extension = "flac"
+mime = "audio/flac"
+header_offset = 0
+header_magic = "66 4C 61 43"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 999
+source = "GCF: fLaC"
+
+[[signature]]
+extension = "ogg"
+mime = "audio/ogg"
+header_offset = 0
+header_magic = "4F 67 67 53"
+tail_offset = 0
+min_size = 27
+max_size = 0
+weight = 990
+source = "GCF: OggS"
+
+# ===== Video =====
+
+[[signature]]
+extension = "mp4"
+mime = "video/mp4"
+header_offset = 4
+header_magic = "66 74 79 70"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 900
+source = "GCF: MP4 ftyp box at offset 4"
+
+[[signature]]
+extension = "avi"
+mime = "video/x-msvideo"
+header_offset = 0
+header_magic = "52 49 46 46 ?? ?? ?? ?? 41 56 49 20"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 970
+source = "GCF: RIFF....AVI "
+
+[[signature]]
+extension = "mkv"
+mime = "video/x-matroska"
+header_offset = 0
+header_magic = "1A 45 DF A3"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 980
+source = "GCF: Matroska EBML header"
+
+[[signature]]
+extension = "flv"
+mime = "video/x-flv"
+header_offset = 0
+header_magic = "46 4C 56 01"
+tail_offset = 0
+min_size = 9
+max_size = 0
+weight = 990
+source = "GCF: FLV\\x01"
+
+# ===== Executables =====
+
+[[signature]]
+extension = "exe"
+mime = "application/x-msdownload"
+header_offset = 0
+header_magic = "4D 5A"
+tail_offset = 0
+min_size = 64
+max_size = 0
+weight = 950
+source = "GCF: MZ (DOS/Windows PE)"
+
+[[signature]]
+extension = "elf"
+mime = "application/x-elf"
+header_offset = 0
+header_magic = "7F 45 4C 46"
+tail_offset = 0
+min_size = 52
+max_size = 0
+weight = 990
+source = "GCF: \\x7fELF"
+
+[[signature]]
+extension = "class"
+mime = "application/x-java-applet"
+header_offset = 0
+header_magic = "CA FE BA BE"
+tail_offset = 0
+min_size = 8
+max_size = 0
+weight = 980
+source = "GCF: Java class \\xca\\xfe\\xba\\xbe"
+
+# ===== Databases =====
+
+[[signature]]
+extension = "sqlite"
+mime = "application/x-sqlite3"
+header_offset = 0
+header_magic = "53 51 4C 69 74 65 20 66 6F 72 6D 61 74 20 33 00"
+tail_offset = 0
+min_size = 100
+max_size = 0
+weight = 999
+source = "GCF: SQLite format 3\\0"
+
+# ===== System =====
+
+[[signature]]
+extension = "iso"
+mime = "application/x-iso9660-image"
+header_offset = 32769
+header_magic = "43 44 30 30 31"
+tail_offset = 0
+min_size = 32774
+max_size = 0
+weight = 990
+source = "GCF: ISO 9660 'CD001' at offset 32769"
+
+[[signature]]
+extension = "vmdk"
+mime = "application/x-vmdk"
+header_offset = 0
+header_magic = "23 20 44 69 73 6B 20 44 65 73 63 72 69 70 74 6F 72 46 69 6C 65"
+tail_offset = 0
+min_size = 1000
+max_size = 0
+weight = 970
+source = "GCF: VMDK '# Disk DescriptorFile'"

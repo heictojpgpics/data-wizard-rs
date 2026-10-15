@@ -1,3 +1,6 @@
+// Integration tests legitimately use assert! / panic! — that's how tests work.
+#![allow(clippy::panic, clippy::expect_used, clippy::unwrap_used)]
+
 //! Integration test: scan a real NTFS image and verify recovery.
 //!
 //! This test is `#[ignore]` by default because it requires a real NTFS
@@ -12,7 +15,6 @@ use std::sync::Arc;
 
 use dw_core::{FsPlugin, ProbeOutcome, ProgressEvent, ProgressSink, ResultsStore, ScanMode};
 use dw_disk::FileBackedSource;
-use dw_ntfs::NtfsPlugin;
 
 struct NoOpSink;
 
@@ -45,7 +47,7 @@ async fn scan_ntfs_image() {
         FileBackedSource::open(std::path::Path::new(&image_path)).expect("failed to open image"),
     );
 
-    let plugin = NtfsPlugin::default();
+    let plugin = dw_ntfs::NtfsPlugin;
 
     // Probe
     let probe = plugin

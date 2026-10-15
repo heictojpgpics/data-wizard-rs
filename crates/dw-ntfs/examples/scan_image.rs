@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!(path = %path.display(), ?mode, "Opening image");
 
     let source = Arc::new(FileBackedSource::open(&path)?);
-    let plugin = NtfsPlugin::default();
+    let plugin = NtfsPlugin;
 
     // Probe
     match plugin.probe(source.as_ref()).await? {
@@ -99,11 +99,10 @@ struct CliProgressSink;
 #[async_trait::async_trait]
 impl ProgressSink for CliProgressSink {
     async fn emit(&self, event: ProgressEvent) {
-        let pct = if event.total > 0 {
-            (event.current * 100 / event.total).min(100)
-        } else {
-            0
-        };
+        let pct = (event.current * 100)
+            .checked_div(event.total)
+            .map(|p| p.min(100))
+            .unwrap_or(0);
         eprintln!(
             "[{:?}] {:3}%  {}  ({}/{})",
             event.phase, pct, event.message, event.current, event.total

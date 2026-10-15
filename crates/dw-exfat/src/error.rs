@@ -10,6 +10,8 @@ pub enum ExfatError {
     Disk(#[from] dw_disk::DiskError),
     #[error("corrupt on-disk structure: {0}")]
     Corrupt(String),
+    #[error("not an exFAT volume")]
+    NotExfat,
     #[error("out of range: offset={offset}, len={len}")]
     OutOfRange { offset: u64, len: u64 },
     #[error("not yet implemented: {0}")]

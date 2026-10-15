@@ -18,5 +18,9 @@ tracing      = { workspace = true }
 bytes        = { workspace = true }
 ahash        = "0.8"
 
+[build-dependencies]
+toml = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+
 [dev-dependencies]
 tempfile = "3.27"
