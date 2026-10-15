@@ -69,6 +69,7 @@ unimplemented = "warn"
 broken_intra_doc_links = "deny"
 
 [workspace.dependencies]
+tempfile = "3.27"
 # Internal
 dw-core       = { path = "crates/dw-core" }
 dw-disk       = { path = "crates/dw-disk" }

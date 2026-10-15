@@ -31,6 +31,7 @@ impl FsPlugin for ZfsPlugin {
         _mode: ScanMode,
         _results: Arc<ResultsStore>,
         _progress: Arc<dyn ProgressSink>,
+        _cancel: Arc<std::sync::atomic::AtomicBool>,
     ) -> CoreResult<()> {
         // TODO: real scan logic
         Ok(())

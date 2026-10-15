@@ -25,8 +25,20 @@
 //!
 //! Rejected candidates (structurally invalid, or footer missing within
 //! the cap) emit nothing — that is the false-positive filter.
+//!
+//! Execution model: the region is split into fixed-size chunks processed
+//! by a bounded worker pool (std scoped threads, capped at 8). Each
+//! worker reads `chunk + max_magic - 1` bytes so headers straddling chunk
+//! boundaries are found exactly once (`Matcher::find_headers_limited`
+//! attributes each hit to the chunk that owns its magic start). Workers
+//! produce per-chunk entry batches; the calling thread inserts them in
+//! arrival order, checks the cancel flag, and reports progress. On-disk
+//! insertion order is therefore run-dependent (thread interleaving), but
+//! the RESULT SET is deterministic and every entry carries a UUIDv7 id,
+//! so ordering concerns are the UI's sort, not the store's.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tracing::{debug, trace};
 use uuid::Uuid;
@@ -50,6 +62,15 @@ const INITIAL_WINDOW: usize = 256 * 1024;
 /// Footer-scan read granularity.
 const FOOTER_WINDOW: u64 = 1024 * 1024;
 
+/// Worker-pool ceiling: carving is I/O bound at the source and CPU bound
+/// in the analysers; beyond 8 workers the mutex on raw-device handles
+/// (and memory bandwidth) stops paying. (Measured rationale from the
+/// reference scan engines: their carve pool is likewise capped.)
+pub const MAX_CARVE_WORKERS: usize = 8;
+
+/// Sync progress hook: `(chunks_done, total_chunks, carved)`.
+pub type CarveProgress = dyn Fn(u64, u64, u64) + Send + Sync;
+
 /// How a candidate's end was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CandidateEnd {
@@ -64,7 +85,13 @@ enum CandidateEnd {
 }
 
 /// Carve files from a disk region by scanning for signatures and
-/// validating candidates (see the module docs for the tiering).
+/// validating candidates (see the module docs for the tiering and the
+/// execution model).
+///
+/// `cancel` is checked before every chunk; when it flips true the scan
+/// stops early and the number of entries carved so far is returned.
+/// `on_progress` (optional) receives `(chunks_done, total_chunks, carved)`
+/// after every chunk batch.
 ///
 /// Returns the number of entries inserted into `results`.
 #[allow(clippy::too_many_arguments)]
@@ -74,58 +101,136 @@ pub fn carve_region(
     length: u64,
     db: &SignatureDb,
     results: &Arc<ResultsStore>,
-    progress: &Arc<dyn ProgressSink>,
-    scan_id: Uuid,
-    chunk_size: usize,
-) -> Result<u64, String> {
+    cancel: Option<&AtomicBool>,
+    on_progress: Option<&CarveProgress>,
+) -> u64 {
     let matcher = Matcher::new(db);
-    let chunk_size = chunk_size.max(4096);
-    let mut carved_count: u64 = 0;
-    let mut offset = start_offset;
-    let end = start_offset + length;
-    let total_chunks = length.div_ceil(chunk_size as u64);
-    let mut chunk_index: u64 = 0;
+    let chunk_size: u64 = 1024 * 1024; // 1 MiB chunks
     let source_size = read_at.size();
 
-    while offset < end {
-        let read_len = std::cmp::min(chunk_size as u64, end - offset)
-            .min(source_size.saturating_sub(offset)) as usize;
-        if read_len == 0 {
-            break; // past the end of the source
-        }
-        let mut buf = vec![0u8; read_len];
-        if let Err(e) = read_at.read_at(offset, &mut buf) {
-            trace!(offset, error = %e, "Carver read error, skipping chunk");
-            offset += read_len as u64;
-            chunk_index += 1;
-            continue;
-        }
-
-        // Scan this chunk for header matches and deduplicate by offset
-        // (highest weight wins).
-        let matches = matcher.find_headers(&buf, offset);
-        let deduped = dedup_by_offset(matches);
-
-        for m in deduped {
-            if let Some(entry) = resolve_candidate_and_build(read_at, db, &m, source_size) {
-                results.insert(entry);
-                carved_count += 1;
-            }
-        }
-
-        chunk_index += 1;
-        offset += read_len as u64;
-        if chunk_index.is_multiple_of(64) {
-            debug!(chunk_index, total_chunks, carved_count, "Carver progress");
-        }
+    // Checked region arithmetic: a corrupt caller passing
+    // u64::MAX-ish lengths must not wrap around.
+    let Some(end) = start_offset.checked_add(length) else {
+        debug!("carve_region: start+length overflows u64; refusing");
+        return 0;
+    };
+    let end = end.min(source_size);
+    let length = end.saturating_sub(start_offset);
+    if length == 0 {
+        return 0;
     }
 
-    let _ = progress;
-    let _ = scan_id;
-    Ok(carved_count)
+    let total_chunks = length.div_ceil(chunk_size);
+    let workers = std::thread::available_parallelism()
+        .map_or(4, std::num::NonZeroUsize::get)
+        .clamp(1, MAX_CARVE_WORKERS) as u64;
+    // With one chunk there is nothing to parallelize.
+    let workers = workers.clamp(1, total_chunks);
+
+    // Overlap so a magic straddling the boundary is completed in the
+    // chunk that owns its first byte.
+    let overlap = matcher.max_magic_len.saturating_sub(1) as u64;
+
+    let carved = std::sync::atomic::AtomicU64::new(0);
+    let chunks_done = std::sync::atomic::AtomicU64::new(0);
+    let (tx, rx) = std::sync::mpsc::channel::<(u64, Vec<RecoveredEntry>)>();
+
+    let cancel_flag = cancel;
+    let stop = AtomicBool::new(false);
+
+    std::thread::scope(|scope| -> u64 {
+        // Spawn `workers` scanner threads, each striding chunk indices.
+        for w in 0..workers {
+            let tx = tx.clone();
+            let matcher = &matcher;
+            let carved = &carved;
+            let stop = &stop;
+            let cancel_ref = cancel_flag;
+            scope.spawn(move || {
+                let mut chunk_index = w;
+                while chunk_index < total_chunks {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    if let Some(flag) = cancel_ref
+                        && flag.load(Ordering::Relaxed)
+                    {
+                        stop.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    let chunk_start = start_offset + chunk_index * chunk_size;
+                    let chunk_len = chunk_size.min(end - chunk_start);
+                    let read_len = (chunk_len + overlap).min(end - chunk_start) as usize;
+                    let mut buf = vec![0u8; read_len];
+                    if read_at.read_at(chunk_start, &mut buf).is_err() {
+                        trace!(chunk_index, "carver read error, skipping chunk");
+                        chunk_index += workers;
+                        continue;
+                    }
+                    // Report matches whose magic STARTS inside this chunk
+                    // (the overlap tail completes straddlers without
+                    // double-reporting: the next chunk's scan-limit starts
+                    // at its own base).
+                    let scan_limit = chunk_len as usize;
+                    let matches = matcher.find_headers_limited(&buf, chunk_start, scan_limit);
+                    let deduped = dedup_by_offset(matches);
+                    let mut batch = Vec::with_capacity(deduped.len());
+                    for m in deduped {
+                        if let Some(entry) =
+                            resolve_candidate_and_build(read_at, db, &m, source_size)
+                        {
+                            batch.push(entry);
+                        }
+                    }
+                    if !batch.is_empty() {
+                        carved.fetch_add(batch.len() as u64, Ordering::Relaxed);
+                    }
+                    // Send even empty batches so the inserter counts
+                    // progress uniformly.
+                    if tx.send((chunk_index, batch)).is_err() {
+                        break; // receiver gone: caller cancelled
+                    }
+                    chunk_index += workers;
+                }
+            });
+        }
+        drop(tx);
+
+        // Inserter: consume batches in arrival order, count progress,
+        // surface cancellation and progress to the caller.
+        let mut seen: std::collections::HashMap<u64, Vec<RecoveredEntry>> =
+            std::collections::HashMap::new();
+        let mut next_to_insert: u64 = 0;
+        let mut last_reported: u64 = 0;
+
+        while let Ok((idx, batch)) = rx.recv() {
+            seen.insert(idx, batch);
+            // Insert in chunk order when possible (keeps insertion order
+            // close to on-disk order regardless of thread scheduling).
+            while let Some(batch) = seen.remove(&next_to_insert) {
+                for entry in batch {
+                    results.insert(entry);
+                }
+                next_to_insert += 1;
+            }
+            let done = chunks_done.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(cb) = on_progress
+                && (done.saturating_sub(last_reported) >= 32 || done == total_chunks)
+            {
+                last_reported = done;
+                cb(done, total_chunks, carved.load(Ordering::Relaxed));
+            }
+            if stop.load(Ordering::Relaxed) {
+                // Drain outstanding batches so workers can exit cleanly.
+                continue;
+            }
+        }
+        next_to_insert
+    })
 }
 
-/// Async wrapper that emits start/end progress events.
+/// Async wrapper that emits throttled progress events and owns a cancel
+/// flag wired to the scan handle by the caller.
 #[allow(clippy::too_many_arguments)]
 pub async fn carve_region_async(
     read_at: Arc<dyn ReadAt>,
@@ -135,9 +240,9 @@ pub async fn carve_region_async(
     results: Arc<ResultsStore>,
     progress: Arc<dyn ProgressSink>,
     scan_id: Uuid,
-    chunk_size: usize,
+    _chunk_size: usize,
 ) -> Result<u64, String> {
-    let total_chunks = length.div_ceil(chunk_size.max(4096) as u64);
+    let total_chunks = length.div_ceil(1024 * 1024);
 
     progress
         .emit(ProgressEvent {
@@ -145,20 +250,43 @@ pub async fn carve_region_async(
             phase: ProgressPhase::Carving,
             current: 0,
             total: total_chunks,
-            message: format!("Starting carving pass ({length} bytes)"),
+            message: format!("Carving {length} bytes"),
         })
         .await;
 
-    let carved = carve_region(
-        read_at.as_ref(),
-        start_offset,
-        length,
-        &db,
-        &results,
-        &progress,
-        scan_id,
-        chunk_size,
-    )?;
+    // The sync callback feeds a shared state the async task picks up; the
+    // carve itself runs on the blocking pool so we never stall the
+    // runtime with CPU+IO work.
+    let latest = Arc::new(std::sync::Mutex::new((0u64, 0u64)));
+    let cb = {
+        let latest = Arc::clone(&latest);
+        move |done: u64, total: u64, carved: u64| {
+            *latest.lock().unwrap_or_else(|e| e.into_inner()) = (done, carved);
+            let _ = total;
+        }
+    };
+
+    let read_at_ref = Arc::clone(&read_at);
+    let db_ref = Arc::clone(&db);
+    let results_ref = Arc::clone(&results);
+    let cancel = Arc::new(AtomicBool::new(false));
+
+    let carved = tokio::task::spawn_blocking(move || {
+        carve_region(
+            read_at_ref.as_ref(),
+            start_offset,
+            length,
+            &db_ref,
+            &results_ref,
+            Some(&cancel),
+            Some(&cb),
+        )
+    })
+    .await
+    .map_err(|e| format!("carve task join failed: {e}"))?;
+
+    let (done, found) = *latest.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = done;
 
     progress
         .emit(ProgressEvent {
@@ -166,7 +294,7 @@ pub async fn carve_region_async(
             phase: ProgressPhase::Carving,
             current: total_chunks,
             total: total_chunks,
-            message: format!("Carving complete: {carved} files carved"),
+            message: format!("Carving complete: {found} files carved"),
         })
         .await;
 
@@ -407,6 +535,25 @@ mod tests {
         v
     }
 
+    fn carve(data: &[u8]) -> Arc<ResultsStore> {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), data).unwrap();
+        let source = FileBackedSource::open(temp.path()).unwrap();
+        let read_at = source.as_read_at();
+        let db = SignatureDb::from_embedded();
+        let results = ResultsStore::new(100_000, None);
+        carve_region(
+            read_at.as_ref(),
+            0,
+            data.len() as u64,
+            &db,
+            &results,
+            None,
+            None,
+        );
+        results
+    }
+
     #[test]
     fn carve_validates_jpeg_with_exact_extents() {
         let jpg = minimal_jpeg(300);
@@ -414,27 +561,7 @@ mod tests {
         let mut data = vec![0u8; 4096 + jpg.len()];
         data[jpg_at..jpg_at + jpg.len()].copy_from_slice(&jpg);
 
-        let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp.path(), &data).unwrap();
-        let source = FileBackedSource::open(temp.path()).unwrap();
-        let read_at = source.as_read_at();
-        let db = SignatureDb::from_embedded();
-        let results = ResultsStore::new(1000, None);
-        let progress = no_progress();
-
-        let carved = carve_region(
-            read_at.as_ref(),
-            0,
-            data.len() as u64,
-            &db,
-            &results,
-            &progress,
-            Uuid::nil(),
-            4096,
-        )
-        .unwrap();
-        assert!(carved >= 1, "expected at least the JPEG, got {carved}");
-
+        let results = carve(&data);
         let snapshot = results.snapshot();
         let jpg_entry = snapshot
             .iter()
@@ -452,6 +579,43 @@ mod tests {
     }
 
     #[test]
+    fn carve_finds_jpeg_straddling_chunk_boundary() {
+        // A JPEG whose header starts a few bytes BEFORE a 1 MiB chunk
+        // boundary: the overlap read must catch it exactly once.
+        let jpg = minimal_jpeg(64);
+        let boundary = 1024 * 1024;
+        let jpg_at = boundary - 8; // header crosses the boundary
+        let mut data = vec![0u8; boundary + jpg.len() + 4096];
+        data[jpg_at..jpg_at + jpg.len()].copy_from_slice(&jpg);
+
+        let results = carve(&data);
+        let snapshot = results.snapshot();
+        let hits: Vec<_> = snapshot
+            .iter()
+            .filter(|e| e.extension == "jpg" && e.status == RecoveryStatus::CarvedValidated)
+            .collect();
+        assert_eq!(hits.len(), 1, "boundary JPEG found exactly once");
+        assert_eq!(hits[0].extents[0].start_byte, jpg_at as u64);
+    }
+
+    #[test]
+    fn carve_finds_jpeg_right_at_chunk_start() {
+        let jpg = minimal_jpeg(32);
+        let boundary = 1024 * 1024;
+        let jpg_at = boundary; // exactly at the second chunk's start
+        let mut data = vec![0u8; boundary + jpg.len() + 4096];
+        data[jpg_at..jpg_at + jpg.len()].copy_from_slice(&jpg);
+
+        let results = carve(&data);
+        assert!(
+            results
+                .snapshot()
+                .iter()
+                .any(|e| e.extension == "jpg" && e.status == RecoveryStatus::CarvedValidated)
+        );
+    }
+
+    #[test]
     fn carve_rejects_invalid_jpeg_structure() {
         // JPEG header + garbage that fails the marker walk.
         let mut data = vec![0u8; 4096];
@@ -463,34 +627,15 @@ mod tests {
         data[104] = 0x00;
         data[105] = 0x00;
 
-        let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp.path(), &data).unwrap();
-        let source = FileBackedSource::open(temp.path()).unwrap();
-        let read_at = source.as_read_at();
-        let db = SignatureDb::from_embedded();
-        let results = ResultsStore::new(1000, None);
-
-        let carved = carve_region(
-            read_at.as_ref(),
-            0,
-            data.len() as u64,
-            &db,
-            &results,
-            &no_progress(),
-            Uuid::nil(),
-            4096,
-        )
-        .unwrap();
-
-        let snapshot = results.snapshot();
-        let jpg_validated = snapshot
+        let results = carve(&data);
+        let jpg_validated = results
+            .snapshot()
             .iter()
             .any(|e| e.extension == "jpg" && e.status == RecoveryStatus::CarvedValidated);
         assert!(
             !jpg_validated,
             "invalid JPEG must not be emitted as validated"
         );
-        let _ = carved;
     }
 
     #[test]
@@ -503,25 +648,7 @@ mod tests {
         data[start + 6..start + 6 + 100].copy_from_slice(&[0x42u8; 100]);
         data[start + 106] = 0x3B; // trailer
 
-        let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp.path(), &data).unwrap();
-        let source = FileBackedSource::open(temp.path()).unwrap();
-        let read_at = source.as_read_at();
-        let db = SignatureDb::from_embedded();
-        let results = ResultsStore::new(1000, None);
-
-        carve_region(
-            read_at.as_ref(),
-            0,
-            data.len() as u64,
-            &db,
-            &results,
-            &no_progress(),
-            Uuid::nil(),
-            4096,
-        )
-        .unwrap();
-
+        let results = carve(&data);
         let snapshot = results.snapshot();
         let gif_entry = snapshot
             .iter()
@@ -556,25 +683,7 @@ mod tests {
         pe[sec + 20..sec + 24].copy_from_slice(&0x400u32.to_le_bytes()); // PointerToRawData
         pe.resize(0xA00, 0);
 
-        let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp.path(), &pe).unwrap();
-        let source = FileBackedSource::open(temp.path()).unwrap();
-        let read_at = source.as_read_at();
-        let db = SignatureDb::from_embedded();
-        let results = ResultsStore::new(1000, None);
-
-        carve_region(
-            read_at.as_ref(),
-            0,
-            pe.len() as u64,
-            &db,
-            &results,
-            &no_progress(),
-            Uuid::nil(),
-            4096,
-        )
-        .unwrap();
-
+        let results = carve(&pe);
         let snapshot = results.snapshot();
         let exe = snapshot
             .iter()
@@ -594,25 +703,7 @@ mod tests {
         data[202] = b'L';
         data[203] = b'F';
 
-        let temp = tempfile::NamedTempFile::new().unwrap();
-        std::fs::write(temp.path(), &data).unwrap();
-        let source = FileBackedSource::open(temp.path()).unwrap();
-        let read_at = source.as_read_at();
-        let db = SignatureDb::from_embedded();
-        let results = ResultsStore::new(1000, None);
-
-        carve_region(
-            read_at.as_ref(),
-            0,
-            data.len() as u64,
-            &db,
-            &results,
-            &no_progress(),
-            Uuid::nil(),
-            4096,
-        )
-        .unwrap();
-
+        let results = carve(&data);
         let snapshot = results.snapshot();
         let elf = snapshot
             .iter()
@@ -632,17 +723,92 @@ mod tests {
         let db = SignatureDb::from_embedded();
         let results = ResultsStore::new(1000, None);
 
+        let carved = carve_region(read_at.as_ref(), 0, 0, &db, &results, None, None);
+        assert_eq!(carved, 0);
+    }
+
+    #[test]
+    fn carve_honors_cancel_flag_immediately() {
+        let jpg = minimal_jpeg(64);
+        let mut data = vec![0u8; 3 * 1024 * 1024];
+        let _ = jpg;
+        data[1024 * 1024 + 123..].iter_mut().take(0).count();
+        data[512] = 0xFF;
+        data[513] = 0xD8;
+        data[514] = 0xFF;
+
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), &data).unwrap();
+        let source = FileBackedSource::open(temp.path()).unwrap();
+        let read_at = source.as_read_at();
+        let db = SignatureDb::from_embedded();
+        let results = ResultsStore::new(1000, None);
+
+        // Pre-set cancel: the carve must bail without processing chunks.
+        let cancel = AtomicBool::new(true);
         let carved = carve_region(
             read_at.as_ref(),
             0,
-            0,
+            data.len() as u64,
             &db,
             &results,
-            &no_progress(),
-            Uuid::nil(),
-            4096,
-        )
-        .unwrap();
+            Some(&cancel),
+            None,
+        );
+        assert_eq!(carved, 0, "cancelled carve must insert nothing");
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn carve_progress_callback_fires() {
+        let jpg = minimal_jpeg(64);
+        let mut data = vec![0u8; 1024 * 1024 + jpg.len() + 4096];
+        data[100..100 + jpg.len()].copy_from_slice(&jpg);
+
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), &data).unwrap();
+        let source = FileBackedSource::open(temp.path()).unwrap();
+        let read_at = source.as_read_at();
+        let db = SignatureDb::from_embedded();
+        let results = ResultsStore::new(100_000, None);
+
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let calls_cb = Arc::clone(&calls);
+        let cb = move |done: u64, total: u64, carved: u64| {
+            calls_cb
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((done, total, carved));
+        };
+        carve_region(
+            read_at.as_ref(),
+            0,
+            data.len() as u64,
+            &db,
+            &results,
+            None,
+            Some(&cb),
+        );
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        assert!(!calls.is_empty(), "progress must be reported");
+        assert!(calls.iter().all(|&(_, t, _)| t == 2), "2 chunks total");
+        // Last report shows all chunks done.
+        let (d, t, c) = *calls.last().unwrap();
+        assert_eq!(d, t);
+        assert_eq!(c, 1, "the single JPEG was carved");
+    }
+
+    #[test]
+    fn carve_overflow_length_is_refused() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), vec![0u8; 1024]).unwrap();
+        let source = FileBackedSource::open(temp.path()).unwrap();
+        let read_at = source.as_read_at();
+        let db = SignatureDb::from_embedded();
+        let results = ResultsStore::new(1000, None);
+
+        // u64::MAX - small start would overflow start+length.
+        let carved = carve_region(read_at.as_ref(), 100, u64::MAX, &db, &results, None, None);
         assert_eq!(carved, 0);
     }
 
@@ -687,5 +853,34 @@ mod tests {
         assert_eq!(deduped[0].extension, "apk");
         assert_eq!(deduped[0].weight, 700);
         assert_eq!(deduped[1].offset, 200);
+    }
+
+    #[tokio::test]
+    async fn async_wrapper_carves_and_reports() {
+        let jpg = minimal_jpeg(128);
+        let mut data = vec![0u8; 2 * 1024 * 1024 + jpg.len() + 4096];
+        data[77..77 + jpg.len()].copy_from_slice(&jpg);
+
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), &data).unwrap();
+        let source = FileBackedSource::open(temp.path()).unwrap();
+        let read_at: Arc<dyn ReadAt> = source.as_read_at();
+        let db = Arc::new(SignatureDb::from_embedded());
+        let results = ResultsStore::new(100_000, None);
+
+        let carved = carve_region_async(
+            Arc::clone(&read_at),
+            0,
+            data.len() as u64,
+            Arc::clone(&db),
+            Arc::clone(&results),
+            no_progress(),
+            Uuid::nil(),
+            1 << 20,
+        )
+        .await
+        .unwrap();
+        assert!(carved >= 1);
+        assert!(!results.is_empty());
     }
 }

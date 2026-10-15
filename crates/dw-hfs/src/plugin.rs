@@ -71,6 +71,7 @@ impl FsPlugin for HfsPlugin {
         mode: ScanMode,
         results: Arc<ResultsStore>,
         progress: Arc<dyn ProgressSink>,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
     ) -> CoreResult<()> {
         let read_at = source.as_read_at();
         let vh = walker::read_volume_header(read_at.as_ref())
@@ -91,9 +92,10 @@ impl FsPlugin for HfsPlugin {
         let outcome = walker::walk_catalog(read_at.as_ref(), &vh, &results, &progress, scan_id)?;
 
         if mode == ScanMode::Deep {
-            let carved = deep_carve_free_blocks(&source, &vh, &results, &progress, scan_id)
-                .await
-                .unwrap_or(0);
+            let carved =
+                deep_carve_free_blocks(&source, &vh, &results, &progress, scan_id, &cancel)
+                    .await
+                    .unwrap_or(0);
             info!(
                 entries = outcome.entries,
                 carved, "HFS+ deep scan complete (catalog + carving)"
@@ -114,8 +116,9 @@ async fn deep_carve_free_blocks(
     source: &Arc<dyn DiskSource>,
     vh: &VolumeHeader,
     results: &Arc<ResultsStore>,
-    progress: &Arc<dyn ProgressSink>,
-    scan_id: uuid::Uuid,
+    _progress: &Arc<dyn ProgressSink>,
+    _scan_id: uuid::Uuid,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Option<u64> {
     let read_at = source.as_read_at();
     let bs = u64::from(vh.block_size);
@@ -207,11 +210,9 @@ async fn deep_carve_free_blocks(
             len,
             &db,
             results,
-            progress,
-            scan_id,
-            1 << 20,
-        )
-        .unwrap_or(0);
+            Some(cancel),
+            None, // sync per-chunk progress: plugin reports around the loop
+        );
         carved_total += carved;
     }
     Some(carved_total)

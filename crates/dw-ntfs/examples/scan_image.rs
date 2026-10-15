@@ -64,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Scan
     let results = ResultsStore::new(1_000_000, None);
     let progress = Arc::new(CliProgressSink);
-    plugin.scan(source, mode, results.clone(), progress).await?;
+    plugin.scan(source, mode, results.clone(), progress, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))).await?;
 
     // Print results
     let snapshot = results.snapshot();

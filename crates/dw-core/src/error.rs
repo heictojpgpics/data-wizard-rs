@@ -27,6 +27,9 @@ pub enum CoreError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("results spill error: {0}")]
+    Spill(String),
+
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 

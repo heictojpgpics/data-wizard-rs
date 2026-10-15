@@ -70,11 +70,16 @@ pub trait FsPlugin: Send + Sync {
 
     /// Run a scan (quick or deep) against `source`, appending recovered
     /// entries to `results` and emitting progress through `progress`.
+    ///
+    /// `cancel` flips true when the user cancels; long-running inner
+    /// loops (deep carving above all) must poll it and bail early
+    /// (returning `Err(CoreError::Cancelled)`).
     async fn scan(
         &self,
         source: Arc<dyn DiskSource>,
         mode: ScanMode,
         results: Arc<ResultsStore>,
         progress: Arc<dyn ProgressSink>,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
     ) -> CoreResult<()>;
 }
