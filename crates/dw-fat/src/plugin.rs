@@ -1,16 +1,14 @@
 //! FsPlugin impl for FAT12/16/32.
-//!
-//! The probe pass reads the boot sector and parses the BPB. The scan
-//! pass is stubbed for now — directory walking is the next implementation
-//! milestone (see `docs/algorithms/fat-recovery.md`).
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use dw_core::{CoreResult, FsPlugin, FsProbe, ProbeOutcome, ProgressSink, ResultsStore, ScanMode};
 use dw_disk::DiskSource;
+use tracing::info;
 
 use crate::bpb::{FatBpb, FatKind};
+use crate::walker::walk_fat;
 
 pub struct FatPlugin;
 
@@ -59,9 +57,6 @@ impl FsPlugin for FatPlugin {
                 Ok(ProbeOutcome::Yes(probe))
             }
             Err(e) => {
-                // FAT parse failed — either this isn't a FAT volume, or the
-                // BPB is corrupt. We can't reliably distinguish, so we
-                // return No and let the next plugin try.
                 tracing::debug!("fat probe rejected: {e}");
                 Ok(ProbeOutcome::No)
             }
@@ -70,20 +65,31 @@ impl FsPlugin for FatPlugin {
 
     async fn scan(
         &self,
-        _source: Arc<dyn DiskSource>,
-        _mode: ScanMode,
-        _results: Arc<ResultsStore>,
-        _progress: Arc<dyn ProgressSink>,
+        source: Arc<dyn DiskSource>,
+        mode: ScanMode,
+        results: Arc<ResultsStore>,
+        progress: Arc<dyn ProgressSink>,
     ) -> CoreResult<()> {
-        // TODO: implement directory walk + FAT chain recovery.
-        // See docs/algorithms/fat-recovery.md.
+        // Re-read the BPB.
+        let bytes = source
+            .read_at_async(0, 512)
+            .await
+            .map_err(|e| dw_core::CoreError::Plugin(format!("fat scan BPB read: {e}")))?;
+        let mut buf = [0u8; 512];
+        buf.copy_from_slice(&bytes);
+        let bpb = FatBpb::parse(&buf)
+            .map_err(|e| dw_core::CoreError::Plugin(format!("fat scan BPB parse: {e}")))?;
+
+        info!(kind = ?bpb.kind, mode = ?mode, "Starting FAT scan");
+
+        let entries = walk_fat(source, &bpb, mode, results.clone(), progress.clone()).await?;
+
+        info!(entries, "FAT scan complete");
         Ok(())
     }
 }
 
 fn estimate_quick_seconds(total_bytes: u64) -> u32 {
-    // FAT directory walk is typically 2-5x faster than NTFS MFT walk
-    // because the directory tree is smaller.
     let est_entries = total_bytes / (16 * 1024);
     let secs = est_entries / 2_000_000;
     secs.try_into().unwrap_or(u32::MAX)
