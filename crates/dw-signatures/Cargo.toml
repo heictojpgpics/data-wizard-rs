@@ -24,3 +24,8 @@ serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.27"
+criterion = "0.7"
+
+[[bench]]
+name = "matcher"
+harness = false
