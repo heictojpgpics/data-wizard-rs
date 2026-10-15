@@ -200,3 +200,58 @@ Next steps (Task 4+):
 - Wire up Tauri events for live scan progress
 - Set up GitHub Actions dispatch from data-wizard-rs pushes to data-wizard-ci
 - Add NTFS test fixtures (small NTFS image with known files)
+
+---
+Task ID: 4
+Agent: main
+Task: Implement NTFS MFT record parser with USN fixup + run list decoder
+
+Work Log:
+- Implemented FileRecordHeader (48-byte repr(C, packed) Pod struct)
+  with all fields per MS-NTFS spec: magic, USN offset/size, LSN,
+  sequence number, hard link count, first attribute offset, flags,
+  used/allocated size, base record reference, next attribute ID,
+  MFT record number (Vista+)
+- Implemented AttributeHeader + Attribute + AttributeData types for
+  parsing both resident (inline) and non-resident (cluster-based)
+  attributes
+- Implemented FileRecord::parse() with full USN fixup logic:
+  - Validates FILE magic
+  - Reads USN array (value + saved sector trailers)
+  - For each 512-byte sector: verifies trailer matches USN value,
+    replaces with saved value (detects torn writes)
+  - Walks attribute list from first_attribute_offset to 0xFFFFFFFF
+  - Parses resident attrs (content length + offset) and non-resident
+    attrs (VCN range + run list + allocated/real/initialized size)
+- Implemented decode_run_list() for NTFS compressed run list encoding:
+  - Header byte: low nibble = length size (1-8), high nibble = offset size (0-8)
+  - Length: unsigned LE
+  - Offset: signed LE, relative to previous run (sparse if off_size=0)
+  - Sign-extends negative offsets for backward runs
+- Added attribute type constants module (STANDARD_INFORMATION, FILE_NAME,
+  DATA, INDEX_ROOT, INDEX_ALLOCATION, etc.)
+- 7 unit tests, all passing:
+  - parses_minimal_file_record (Vista+ layout)
+  - rejects_bad_magic
+  - detects_usn_mismatch (torn write detection)
+  - decode_simple_run_list
+  - decode_multi_run_list (relative offset accumulation)
+  - decode_sparse_run (sparse runs between real runs)
+  - decode_negative_offset (backward runs with signed offset)
+- Total workspace: 21 tests passing (8 NTFS boot + 7 NTFS MFT + 6 FAT BPB)
+- Clippy clean with -D warnings, cargo fmt clean
+- Pushed commit 1b297da to data-wizard-rs main
+
+Stage Summary:
+- NTFS parser now handles: VBR probe + MFT record parsing + attribute walk
+  + run list decoding. Ready for the MFT walker (iterate all records,
+  extract file names + data runs, build recovered entries).
+- FAT parser handles: BPB probe. Ready for directory entry parsing.
+- 21 unit tests across 3 parser modules, all passing.
+
+Next steps (Task 5+):
+- Implement FAT directory entry parser (LFN + 8.3)
+- Implement NTFS MFT walker (iterate records, build RecoveredEntry)
+- Implement exFAT boot sector parser
+- Wire up Tauri events for live scan progress
+- Add integration tests with real NTFS/FAT images (created on CI)
