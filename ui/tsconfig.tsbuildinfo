@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/bindings.ts","./src/main.tsx","./src/vite-env.d.ts","./src/components/AgeMap.tsx","./src/components/RecoveryPanel.tsx","./src/components/StatsOverview.tsx","./src/lib/format.ts","./src/views/Results.tsx","./src/views/Scanning.tsx","./src/views/SelectSource.tsx"],"version":"5.9.3"}
