@@ -26,20 +26,6 @@ use dw_disk::ReadAt;
 /// Per-read I/O chunk when streaming a large extent (8 MiB).
 const RECOVERY_IO_CHUNK: u64 = 8 * 1024 * 1024;
 
-/// Recover a single file by reading its physical extents from the source
-/// and writing to the destination.
-///
-///
-/// Priority order:
-///  1. `resident_data` (NTFS resident $DATA) — write inline bytes.
-///  2. `extents` — stream each extent in file order; handles fragmented
-///     files (multi-extent chains) natively. The last extent is already
-///     trimmed to the file size by the walkers.
-///  3. size == 0 — write an empty file.
-///  4. otherwise — typed error: refusing to guess beats writing wrong
-///     bytes. (Carved entries get extents from the analysers; entries with
-///     neither resident data nor extents are unrecoverable by design.)
-
 /// Typed recovery failure.
 #[derive(Debug, Error)]
 pub enum RecoveryError {
