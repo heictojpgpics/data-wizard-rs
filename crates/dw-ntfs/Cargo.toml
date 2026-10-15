@@ -1,0 +1,28 @@
+[package]
+name = "dw-ntfs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "NTFS filesystem parser plugin for data-wizard-rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+dw-core      = { workspace = true }
+dw-disk      = { workspace = true }
+dw-ipc       = { workspace = true }
+tokio        = { workspace = true }
+async-trait  = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+bytes        = { workspace = true }
+bytemuck     = { workspace = true }
+memmap2      = { workspace = true }
+parking_lot  = { workspace = true }
+serde        = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27"

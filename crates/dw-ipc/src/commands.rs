@@ -1,0 +1,76 @@
+//! Tauri command definitions (request/response pairs).
+
+use serde::{Deserialize, Serialize};
+use specta::Type;
+
+use crate::types::{DiskInfo, RecoveredFile, ScanProgress};
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ListDisksRequest {}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ListDisksResponse {
+    pub disks: Vec<DiskInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct StartScanRequest {
+    pub source_uri: String,
+    pub deep: bool,
+    pub max_results: u32,
+    pub file_filter: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct StartScanResponse {
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct CancelScanRequest {
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct CancelScanResponse {
+    pub cancelled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct GetScanProgressRequest {
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct GetScanProgressResponse {
+    pub progress: ScanProgress,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ListResultsRequest {
+    pub scan_id: String,
+    pub offset: u32,
+    pub limit: u32,
+    pub extension_filter: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ListResultsResponse {
+    pub total: u64,
+    pub spilled: u64,
+    pub items: Vec<RecoveredFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RecoverFilesRequest {
+    pub scan_id: String,
+    pub entry_ids: Vec<String>,
+    pub destination_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct RecoverFilesResponse {
+    pub recovered: u32,
+    pub failed: u32,
+    pub errors: Vec<String>,
+}

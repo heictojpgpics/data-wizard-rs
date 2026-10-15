@@ -1,0 +1,148 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dw-core",
+    "crates/dw-disk",
+    "crates/dw-ntfs",
+    "crates/dw-fat",
+    "crates/dw-exfat",
+    "crates/dw-ext",
+    "crates/dw-hfs",
+    "crates/dw-btrfs",
+    "crates/dw-refs",
+    "crates/dw-zfs",
+    "crates/dw-signatures",
+    "crates/dw-carver",
+    "crates/dw-ipc",
+    # `src-tauri` is excluded from the default workspace because it pulls in
+    # the full Tauri 2 dependency tree (which differs between Linux and
+    # Windows). It's built explicitly by CI on Windows runners.
+    # To build locally on Windows: `cargo build -p dw-tauri`.
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/heictojpgpics/data-wizard-rs"
+homepage = "https://github.com/heictojpgpics/data-wizard-rs"
+authors = ["data-wizard-rs contributors"]
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+unused_must_use = "deny"
+rust_2024_compatibility = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+# Allow some pragmatic patterns
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+option_option = "allow"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"
+
+[workspace.dependencies]
+# Internal
+dw-core       = { path = "crates/dw-core" }
+dw-disk       = { path = "crates/dw-disk" }
+dw-ntfs       = { path = "crates/dw-ntfs" }
+dw-fat        = { path = "crates/dw-fat" }
+dw-exfat      = { path = "crates/dw-exfat" }
+dw-ext        = { path = "crates/dw-ext" }
+dw-hfs        = { path = "crates/dw-hfs" }
+dw-btrfs      = { path = "crates/dw-btrfs" }
+dw-refs       = { path = "crates/dw-refs" }
+dw-zfs        = { path = "crates/dw-zfs" }
+dw-signatures = { path = "crates/dw-signatures" }
+dw-carver     = { path = "crates/dw-carver" }
+dw-ipc        = { path = "crates/dw-ipc" }
+
+# Core async / utils
+tokio = { version = "1.47", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+flume = "0.11"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "2.1"
+toml = "0.9"
+postcard = "1.1"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2"
+
+# Crypto / hashing
+blake3 = "1.8"
+sha2 = "0.10"
+crc32fast = "1.4"
+crc = "3.3"
+
+# Time
+time = { version = "0.3", features = ["formatting", "parsing", "macros", "serde"] }
+jiff = "0.2"
+
+# Memory-mapped I/O
+memmap2 = "0.9"
+
+# Byteorder / parsing
+bytemuck = { version = "1.23", features = ["derive", "min_const_generics"] }
+byteorder = "1.5"
+bytes = "1.10"
+bytesize = "2.1"
+
+# UUIDs
+uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
+
+# Tauri 2
+tauri = { version = "2", features = [] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-log = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"
+specta = "=2.0.0-rc.22"
+specta-typescript = "0.0.12"
+tauri-specta = { version = "=2.0.0-rc.24", features = ["derive", "typescript"] }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+debug = false
+incremental = false
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+debug = true
+
+[profile.dev]
+opt-level = 0
+debug = true
+incremental = true

@@ -1,0 +1,30 @@
+[package]
+name = "dw-carver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Raw file carving engine for data-wizard-rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+dw-core       = { workspace = true }
+dw-disk       = { workspace = true }
+dw-signatures = { workspace = true }
+tokio        = { workspace = true }
+async-trait  = { workspace = true }
+parking_lot  = { workspace = true }
+flume        = { workspace = true }
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+bytes        = { workspace = true }
+bytemuck     = { workspace = true }
+serde        = { workspace = true }
+ahash        = "0.8"
+
+[dev-dependencies]
+tempfile = "3.27"

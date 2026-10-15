@@ -1,0 +1,20 @@
+[package]
+name = "dw-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed IPC contract shared between the Rust core and the React/TS UI"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+specta       = { workspace = true, features = ["derive"] }
+uuid         = { workspace = true }
+time         = { workspace = true }
+bytesize     = { workspace = true }
+thiserror    = { workspace = true }

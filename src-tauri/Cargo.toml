@@ -1,0 +1,52 @@
+[package]
+name = "dw-tauri"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/heictojpgpics/data-wizard-rs"
+description = "Tauri 2 shell for data-wizard-rs"
+default-run = "dw-tauri"
+
+[build-dependencies]
+tauri-build = { workspace = true, features = [] }
+
+[dependencies]
+dw-core        = { workspace = true }
+dw-disk        = { workspace = true }
+dw-ipc         = { workspace = true }
+dw-ntfs        = { workspace = true }
+dw-fat         = { workspace = true }
+dw-exfat       = { workspace = true }
+dw-ext         = { workspace = true }
+dw-hfs         = { workspace = true }
+dw-btrfs       = { workspace = true }
+dw-refs        = { workspace = true }
+dw-zfs         = { workspace = true }
+dw-signatures  = { workspace = true }
+dw-carver      = { workspace = true }
+tauri          = { workspace = true, features = ["protocol-asset"] }
+tauri-plugin-dialog       = { workspace = true }
+tauri-plugin-fs           = { workspace = true }
+tauri-plugin-shell        = { workspace = true }
+tauri-plugin-log          = { workspace = true }
+tauri-plugin-notification = { workspace = true }
+tauri-plugin-opener       = { workspace = true }
+tauri-plugin-process      = { workspace = true }
+tauri-plugin-window-state = { workspace = true }
+specta          = { workspace = true, features = ["derive"] }
+tauri-specta    = { workspace = true, features = ["derive", "typescript"] }
+specta-typescript = { workspace = true }
+tokio          = { workspace = true }
+parking_lot    = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+thiserror      = { workspace = true }
+anyhow         = { workspace = true }
+tracing        = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid           = { workspace = true }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

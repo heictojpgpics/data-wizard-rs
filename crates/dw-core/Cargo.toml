@@ -1,0 +1,33 @@
+[package]
+name = "dw-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Core scan orchestration, results store, and scheduler for data-wizard-rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+dw-disk      = { workspace = true }
+dw-ipc       = { workspace = true }
+tokio        = { workspace = true }
+futures      = { workspace = true }
+async-trait  = { workspace = true }
+parking_lot  = { workspace = true }
+flume        = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+thiserror    = { workspace = true }
+anyhow       = { workspace = true }
+tracing      = { workspace = true }
+blake3       = { workspace = true }
+uuid         = { workspace = true }
+time         = { workspace = true }
+bytesize     = { workspace = true }
+bytemuck     = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27"

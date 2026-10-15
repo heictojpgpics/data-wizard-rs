@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (without v prefix)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-windows-release:
+    name: Build Windows release
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: ui/package.json
+
+      - name: Install UI deps
+        working-directory: ui
+        run: npm ci || npm install
+
+      - name: Build UI
+        working-directory: ui
+        run: npm run build
+
+      - name: Build Tauri release (MSI + NSIS)
+        run: cargo tauri build --target x86_64-pc-windows-msvc
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ''
+
+      - name: Build portable ZIP
+        shell: pwsh
+        run: |
+          $ts = Get-Date -Format "yyyyMMdd-HHmmss"
+          $zip = "data-wizard-${{ github.ref_name }}-windows-portable.zip"
+          Compress-Archive -Path target/x86_64-pc-windows-msvc/release/dw-tauri.exe -DestinationPath $zip
+          Write-Host "Zip: $zip"
+
+      - name: Upload MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          retention-days: 90
+
+      - name: Upload NSIS
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nsis
+          path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          retention-days: 90
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: data-wizard-*.zip
+          retention-days: 90

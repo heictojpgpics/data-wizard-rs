@@ -1,2 +1,55 @@
-skills/
+# Never commit third-party proprietary payload (clean-room RE only)
+# These directories contain EaseUS binaries/assets we are analyzing but NOT redistributing.
+analysis/extracted/
+analysis/raw/
+download/
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/testdata/*.pem
+
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node / Tauri
 node_modules/
+dist/
+dist-ssr/
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Build artifacts
+*.zip
+*.7z
+*.tar.gz
+*.dmg
+*.exe.bak
+
+# Logs
+*.log
+!tests/**/*.log
+logs/
+
+# Coverage
+*.lcov
+coverage/
+tarpaulin-report.html
+
+# Local CI scratch
+.ci-scratch/

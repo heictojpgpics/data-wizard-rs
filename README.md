@@ -1,0 +1,66 @@
+# data-wizard-rs
+
+State-of-the-art data recovery wizard for Windows, built from scratch in **Rust + Tauri 2 + React/TypeScript**.
+
+> Clean-room re-implementation. We studied the publicly observable architecture of commercial data-recovery products (process model, filesystem-parser-per-FS modular design, raw carving approach, scan-state persistence, UI flow patterns) and rebuilt every line ourselves. **No third-party code, assets, strings, icons, or UI elements are borrowed.** No license or activation is bypassed. Our product is free and open-source under MIT OR Apache-2.0.
+
+## Project status
+
+🚧 **Active reverse-engineering + initial scaffold phase.**
+
+See [`worklog.md`](./worklog.md) for the running work log and [`docs/`](./docs/) for the full reverse-engineering documentation.
+
+## Goals
+
+1. **Match** the recovery capability of commercial data-recovery wizards for the Windows desktop case (NTFS / FAT / exFAT / ext2-4 / ReFS / raw carving).
+2. **Exceed** it in: security posture (full ASLR/DEP/CFG, memory-safe core), UX (modern webview UI), and openness (MIT/Apache, no paywalled features).
+3. **Stay Windows-only for now**. macOS (APFS / HFS+ / ExFAT) is a later milestone. RAID / NAS / Cloud / Crashed-PC / Disk-Health are explicitly out of scope until the core product is stable.
+
+## Tech stack (all latest stable as of 2026-10)
+
+| Layer | Choice | Why |
+|---|---|---|
+| Core engine | Rust 1.99 (edition 2024) | Memory safety, zero-cost abstractions, no GC pauses during deep scans |
+| Process model | Single Tauri app (no service split yet) | Simpler trust boundary; we'll split into a privileged helper only when raw-disk access needs elevation |
+| FS parsers | One `dw-{fs}` crate per filesystem | Mirrors the modular `*SearchDLL` pattern observed in the reference product — narrow public API, easy to test in isolation |
+| IPC | `tauri-specta` (type-safe TS bindings) | End-to-end type safety between Rust and React |
+| UI | React 19 + TypeScript + Vite + Tailwind 4 | Fast HMR, modern, small bundle |
+| Window | Tauri 2 + WebView2 | No Electron bloat; native webview |
+| Build / release | `cargo` + `tauri build` | Outputs MSI + NSIS + portable ZIP |
+| CI | GitHub Actions (Windows runners) | See [`data-wizard-ci`](https://github.com/heictojpgpics/data-wizard-ci) |
+
+## Repository layout
+
+```
+data-wizard-rs/
+├── crates/
+│   ├── dw-core/         # scan orchestration, results store, progress, scheduler
+│   ├── dw-disk/         # raw disk I/O abstraction (Windows DeviceIoControl + file-backed)
+│   ├── dw-ntfs/         # NTFS MFT parser + USN journal + attribute stream recovery
+│   ├── dw-fat/          # FAT12/16/32 parser (directory chain + FAT walking)
+│   ├── dw-exfat/        # exFAT parser (FAT + directory bitmap + stream extensions)
+│   ├── dw-ext/          # ext2/3/4 parser (group descriptors + inode tables + extents)
+│   ├── dw-hfs/          # HFS+ parser (B-tree catalog + extents overflow)
+│   ├── dw-btrfs/        # Btrfs parser (chunk tree + root tree + checksum tree)
+│   ├── dw-refs/         # ReFS parser (metadata table + object ID index)
+│   ├── dw-zfs/          # ZFS parser (vdev label + uberblock + DMU object set)
+│   ├── dw-signature/    # file signature DB (rebuilt from public sources — NOT extracted)
+│   ├── dw-carver/       # raw file carving engine (header/footer + bifragment gap)
+│   └── dw-ipc/          # types shared between Rust core and Tauri/React
+├── src-tauri/           # Tauri 2 shell + command handlers
+├── ui/                  # React/TS frontend
+├── docs/                # reverse-engineering documentation + design specs
+├── scripts/             # build / release / analysis scripts
+├── .github/workflows/   # CI (lint, test, build, release)
+├── worklog.md           # running work log (append-only)
+├── Cargo.toml           # workspace
+└── README.md
+```
+
+## License
+
+Dual-licensed under **MIT** or **Apache-2.0** — pick either.
+
+## Acknowledgements
+
+This project benefits from the publicly documented body of knowledge around filesystem internals (NTFS — libntfs / Linux kernel `fs/ntfs/`; FAT — Microsoft FAT spec; ext2/3/4 — `e2fsprogs`; HFS+ — Apple technote 1150; Btrfs — wiki.btrfs; ReFS — Microsoft docs; ZFS — OpenZFS), file-carving research (NIST CFRED, Gary Kessler's GCF file signatures, Foremost/Scalpel/Photorec), and the broader digital-forensics community. We do not use or redistribute any third-party proprietary binaries, signature databases, or UI assets.
