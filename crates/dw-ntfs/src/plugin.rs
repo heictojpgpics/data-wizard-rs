@@ -173,12 +173,12 @@ impl FsPlugin for NtfsPlugin {
                                 cluster += 1;
                             }
                         }
-                        info!(
-                            carved,
-                            regions = carved_regions,
-                            "NTFS deep scan complete ($Bitmap-guided carving)"
-                        );
                     }
+                    info!(
+                        carved,
+                        regions = carved_regions,
+                        "NTFS deep scan complete ($Bitmap-guided carving)"
+                    );
                 }
                 None => {
                     warn!("$Bitmap not captured; whole-volume carving");
