@@ -439,20 +439,25 @@ mod tests {
         }
     }
 
-    fn tmp() -> tempfile::NamedTempFile {
-        tempfile::NamedTempFile::new().unwrap()
+    /// Destination directory + path. NOT a NamedTempFile: its open
+    /// handle blocks the atomic replace on Windows (os error 5), which
+    /// the Windows runner caught and Linux never could.
+    fn dest(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(name);
+        (dir, path)
     }
 
     #[test]
     fn resident_data_is_written_directly() {
         let src = MemSource { data: vec![0; 16] };
         let e = entry(vec![], 4, Some(vec![1, 2, 3, 4]));
-        let t = tmp();
-        let n = recover_entry(&e, &src, t.path(), CollisionPolicy::Overwrite)
+        let (_d, t) = dest("out.bin");
+        let n = recover_entry(&e, &src, &t, CollisionPolicy::Overwrite)
             .unwrap()
             .bytes_written;
         assert_eq!(n, 4);
-        assert_eq!(std::fs::read(t.path()).unwrap(), vec![1, 2, 3, 4]);
+        assert_eq!(std::fs::read(t.as_path()).unwrap(), vec![1, 2, 3, 4]);
     }
 
     #[test]
@@ -476,13 +481,13 @@ mod tests {
             9,
             None,
         );
-        let t = tmp();
-        let n = recover_entry(&e, &src, t.path(), CollisionPolicy::Overwrite)
+        let (_d, t) = dest("out.bin");
+        let n = recover_entry(&e, &src, &t, CollisionPolicy::Overwrite)
             .unwrap()
             .bytes_written;
         assert_eq!(n, 9);
         assert_eq!(
-            std::fs::read(t.path()).unwrap(),
+            std::fs::read(t.as_path()).unwrap(),
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
         );
     }
@@ -504,12 +509,12 @@ mod tests {
             21 * 1024 * 1024,
             None,
         );
-        let t = tmp();
-        let n = recover_entry(&e, &src, t.path(), CollisionPolicy::Overwrite)
+        let (_d, t) = dest("out.bin");
+        let n = recover_entry(&e, &src, &t, CollisionPolicy::Overwrite)
             .unwrap()
             .bytes_written;
         assert_eq!(n, 21 * 1024 * 1024);
-        let out = std::fs::read(t.path()).unwrap();
+        let out = std::fs::read(t.as_path()).unwrap();
         assert_eq!(out.len(), 21 * 1024 * 1024);
         for (i, b) in out.iter().enumerate() {
             assert_eq!(*b, pattern[i % 256], "mismatch at {i}");
@@ -520,12 +525,12 @@ mod tests {
     fn empty_file_writes_zero_bytes() {
         let src = MemSource { data: vec![] };
         let e = entry(vec![], 0, None);
-        let t = tmp();
-        let n = recover_entry(&e, &src, t.path(), CollisionPolicy::Overwrite)
+        let (_d, t) = dest("out.bin");
+        let n = recover_entry(&e, &src, &t, CollisionPolicy::Overwrite)
             .unwrap()
             .bytes_written;
         assert_eq!(n, 0);
-        assert_eq!(std::fs::read(t.path()).unwrap(), Vec::<u8>::new());
+        assert_eq!(std::fs::read(t.as_path()).unwrap(), Vec::<u8>::new());
     }
 
     #[test]
@@ -533,8 +538,8 @@ mod tests {
         let src = MemSource { data: vec![0; 16] };
         // size > 0 but no extents and no resident data
         let e = entry(vec![], 100, None);
-        let t = tmp();
-        let err = recover_entry(&e, &src, t.path(), CollisionPolicy::Overwrite).unwrap_err();
+        let (_d, t) = dest("out.bin");
+        let err = recover_entry(&e, &src, &t, CollisionPolicy::Overwrite).unwrap_err();
         assert!(matches!(err, RecoveryError::NoKnownLocation { .. }));
         assert!(err.to_string().contains("not recoverable"));
     }
@@ -553,12 +558,12 @@ mod tests {
             100,
             None,
         );
-        let t = tmp();
-        let n = recover_entry(&e, &src, t.path(), CollisionPolicy::Overwrite)
+        let (_d, t) = dest("out.bin");
+        let n = recover_entry(&e, &src, &t, CollisionPolicy::Overwrite)
             .unwrap()
             .bytes_written;
         assert_eq!(n, 10);
-        assert_eq!(std::fs::read(t.path()).unwrap(), vec![9u8; 10]);
+        assert_eq!(std::fs::read(t.as_path()).unwrap(), vec![9u8; 10]);
     }
 
     #[test]
@@ -580,8 +585,8 @@ mod tests {
             8,
             None,
         );
-        let t = tmp();
-        let err = recover_entry(&e, &src, t.path(), CollisionPolicy::Overwrite).unwrap_err();
+        let (_d, t) = dest("out.bin");
+        let err = recover_entry(&e, &src, &t, CollisionPolicy::Overwrite).unwrap_err();
         assert!(matches!(err, RecoveryError::InvalidExtents { .. }));
     }
 
@@ -597,8 +602,8 @@ mod tests {
             100,
             None,
         );
-        let t = tmp();
-        let err = recover_entry(&e, &src, t.path(), CollisionPolicy::Overwrite).unwrap_err();
+        let (_d, t) = dest("out.bin");
+        let err = recover_entry(&e, &src, &t, CollisionPolicy::Overwrite).unwrap_err();
         assert!(matches!(err, RecoveryError::ReadFailed { .. }));
     }
 
@@ -625,18 +630,18 @@ mod tests {
             14,
             None,
         );
-        let t = tmp();
+        let (_d, t) = dest("out.bin");
         let n = recover_entry(
             &e,
             source.as_read_at().as_ref(),
-            t.path(),
+            t.as_path(),
             CollisionPolicy::Overwrite,
         )
         .unwrap()
         .bytes_written;
         assert_eq!(n, 14);
         assert_eq!(
-            std::fs::read(t.path()).unwrap(),
+            std::fs::read(t.as_path()).unwrap(),
             vec![1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 9, 9, 9, 9]
         );
     }
