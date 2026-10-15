@@ -318,3 +318,91 @@ Next steps (Task 6+):
 - Add real file recovery (read clusters, write to destination) in recover_files command
 - Add more signatures to the DB (target: 200+ from GCF)
 - Add fuzzing targets for each parser
+
+---
+Task ID: 6
+Agent: main
+Task: Implement all 8 next steps + fix CI to green
+
+Work Log:
+- Fixed CI failures (all 6 jobs now green on commit b16d9cf8):
+  - Windows compilation: replaced OVERLAPPED struct with SetFilePointerEx + ReadFile (synchronous)
+  - Windows API types: used FILE_BEGIN constant instead of raw int, Some(&mut bytes_read) for ReadFile
+  - UI TypeScript: removed vite-plugin-react (doesn't exist), added @types/node, fixed tsconfig.node.json (composite: true)
+  - Added vite-env.d.ts for CSS module declarations
+  - Split UI build into separate Linux job (faster, no Windows runner needed)
+
+- Step 1: NTFS directory hierarchy resolution
+  - Two-pass MFT walker: collect all records, then resolve paths via parent chain
+  - resolve_path(): walks up parent chain from record 5 (root), detects cycles, handles orphans
+  - Replaced [parent-N] placeholders with real paths like \Users\alice\doc.txt
+  - 6 new tests for path resolution
+
+- Step 2: FAT directory walker
+  - FatTable: FAT12/16/32 cluster chain reader with next_cluster + follow_chain
+  - walker.rs: walks root directory (FAT12/16 fixed region or FAT32 cluster chain)
+  - Recurses into subdirectories via cluster chain following
+  - Cycle detection via visited_dirs HashSet
+  - Deleted entries (0xE5) collected with was_deleted=true
+  - LFN reassembly from multi-entry sequences
+  - 7 new FAT tests (chain following, bad/free cluster detection, cycle detection, FAT12 packing, FAT32 masking)
+
+- Step 3: exFAT directory entry parser
+  - DirEntry enum: FileDirectory, StreamExtension, FileName, Bitmap, UpcaseTable, VolumeLabel
+  - Fixed entry type constants (InUse bit is 0x80 for primary entries, not 0x7F mask)
+  - 12 tests for all entry types including deleted entries
+
+- Step 4: Wire up the carver
+  - Implemented header_footer.rs: carve_region() scans byte windows for signatures
+  - Wired into NTFS plugin's deep scan: MFT walk + carving pass on entire volume
+  - 2 carver tests (JPEG header finding, empty region)
+
+- Step 5: Windows disk enumeration
+  - list_disks command: uses GetLogicalDriveStringsW on Windows to enumerate drive letters
+  - For each drive: opens \\.\C: to get size, builds DiskInfo
+  - Non-Windows: returns empty list (UI supports file-backed images)
+
+- Step 6: Real file recovery
+  - recover_files command: re-opens source, reads file data from clusters, writes to destination
+  - Filename sanitization: replaces /\\:*?"<>| with _, strips leading dots
+  - Returns count of recovered/failed + error messages
+  - ScanRecord now stores source_uri for recovery-time re-opening
+
+- Step 7: Expanded signature DB to 110 signatures
+  - Added signatures-part2.toml with 73 new entries from GCF
+  - Images: TGA, DDS, XCF, SVG, ICO, CUR, PSD
+  - Documents: PostScript, EPS, ODT/ODS/ODP, HTML, XML
+  - Archives: TAR, CAB, XZ, LZ, ZST, JAR, APK
+  - Audio: AAC, M4A, Opus, APE, WV, TTA, AMR, MIDI
+  - Video: MOV, WMV, WMA, MPG, VOB, 3GP, WebM
+  - Executables: Mach-O, DEX, Python .pyc
+  - Databases: Berkeley DB, MS Access, DBF, Lotus NSF
+  - Disk images: VHD, VHDX, QCOW2, WIM, SquashFS, cramfs, ext2/3/4
+  - Fonts: TTF, OTF, WOFF, EOT
+  - Email: PST, OST, EML, mbox
+  - Misc: torrent, LNK, CHM, EPUB, MOBI
+
+- Step 8: Added 8 fuzzing targets
+  - dw-ntfs: fuzz_mft_record, fuzz_vbr_parse, fuzz_filename_parse
+  - dw-fat: fuzz_bpb_parse, fuzz_direntry_parse, fuzz_fat_table
+  - dw-exfat: fuzz_boot_parse, fuzz_direntry_parse
+  - All targets ensure parsers never panic on invalid input
+  - Updated .gitignore for fuzz artifacts
+
+Stage Summary:
+- 89 total tests passing (31 NTFS + 20 FAT + 28 exFAT + 7 signatures + 2 carver + 1 integration)
+- CI all 6 jobs green on commits b16d9cf8 and 38b6034f
+- 110 file signatures embedded in binary from public sources
+- 8 fuzzing targets ready for nightly CI
+- Real scan engine: NTFS MFT walker + FAT directory walker + carving + file recovery
+- Full end-to-end: select source → scan → view results → recover files
+
+Next steps (Task 7+):
+- Implement FAT timestamp parsing (creation/modification times)
+- Implement exFAT directory walker (use the direntry parser to walk root dir)
+- Wire the carver into FAT and exFAT plugins (not just NTFS)
+- Add NTFS $INDEX_ROOT/$INDEX_ALLOCATION parsing for more complete directory listing
+- Add Windows disk partition enumeration (GPT/MBR parsing)
+- Improve file recovery: handle fragmented files (read cluster-by-cluster)
+- Add more analyser validators (JPEG EOI, ZIP EOCD, PNG IEND)
+- Expand signature DB to 200+ (add more from GCF)
