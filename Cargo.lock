@@ -332,25 +332,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dw-btrfs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytemuck",
- "bytes",
- "dw-core",
- "dw-disk",
- "dw-ipc",
- "memmap2",
- "parking_lot",
- "serde",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "dw-carver"
 version = "0.1.0"
 dependencies = [
@@ -548,30 +529,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "dw-refs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytemuck",
- "bytes",
- "dw-core",
- "dw-disk",
- "dw-ipc",
- "memmap2",
- "parking_lot",
- "serde",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "dw-scantool"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "dw-btrfs",
  "dw-carver",
  "dw-core",
  "dw-disk",
@@ -580,9 +541,7 @@ dependencies = [
  "dw-fat",
  "dw-hfs",
  "dw-ntfs",
- "dw-refs",
  "dw-signatures",
- "dw-zfs",
  "tempfile",
  "tokio",
  "tracing",
@@ -601,25 +560,6 @@ dependencies = [
  "tempfile",
  "thiserror",
  "toml",
- "tracing",
-]
-
-[[package]]
-name = "dw-zfs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytemuck",
- "bytes",
- "dw-core",
- "dw-disk",
- "dw-ipc",
- "memmap2",
- "parking_lot",
- "serde",
- "tempfile",
- "thiserror",
- "tokio",
  "tracing",
 ]
 

@@ -848,24 +848,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
-name = "dw-btrfs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytemuck",
- "bytes",
- "dw-core",
- "dw-disk",
- "dw-ipc",
- "memmap2",
- "parking_lot",
- "serde",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "dw-carver"
 version = "0.1.0"
 dependencies = [
@@ -959,15 +941,19 @@ dependencies = [
  "async-trait",
  "bytemuck",
  "bytes",
+ "dw-carver",
  "dw-core",
  "dw-disk",
  "dw-ipc",
+ "dw-signatures",
  "memmap2",
  "parking_lot",
  "serde",
  "thiserror 2.0.21",
+ "time",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1050,24 +1036,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dw-refs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytemuck",
- "bytes",
- "dw-core",
- "dw-disk",
- "dw-ipc",
- "memmap2",
- "parking_lot",
- "serde",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "dw-signatures"
 version = "0.1.0"
 dependencies = [
@@ -1086,7 +1054,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "dw-btrfs",
  "dw-carver",
  "dw-core",
  "dw-disk",
@@ -1096,9 +1063,7 @@ dependencies = [
  "dw-hfs",
  "dw-ipc",
  "dw-ntfs",
- "dw-refs",
  "dw-signatures",
- "dw-zfs",
  "parking_lot",
  "serde",
  "serde_json",
@@ -1116,24 +1081,6 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "windows 0.62.2",
-]
-
-[[package]]
-name = "dw-zfs"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytemuck",
- "bytes",
- "dw-core",
- "dw-disk",
- "dw-ipc",
- "memmap2",
- "parking_lot",
- "serde",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
 ]
 
 [[package]]

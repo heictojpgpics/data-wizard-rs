@@ -14,20 +14,22 @@ See [`worklog.md`](./worklog.md) for the running work log and [`docs/`](./docs/)
 
 | Filesystem | Quick scan | Deep scan (unallocated carving) | Status |
 |---|---|---|---|
-| NTFS 3.x | MFT walk, timestamps, resident data, extents | $Bitmap-guided carve | **Working, tested** |
+| NTFS 3.x | MFT walk, timestamps, resident data, extents | $Bitmap-guided carve + $I30 names for lost records | **Working, tested** |
 | FAT12/16/32 | dir walk, FAT timestamps, extents | free-run carve | **Working, tested** |
 | exFAT | entry-set walk, timestamps, fragmentation | allocation-bitmap carve | **Working, tested** |
 | HFS+ | catalog B-tree walk, extents | free-block carve | **Working, tested** |
-| ext2/3/4 | - | - | Stub (probe says no; planned) |
-| Btrfs | - | - | Stub (probe says no; planned) |
-| ReFS | - | - | Stub (probe says no; planned) |
-| ZFS | - | - | Stub (probe says no; planned) |
+| ext2/3/4 | live walk + shadow-dirent deleted names (extent trees and indirect maps, fragmented files in content order) | orphan-inode pass + free-block carve | **Working, tested** |
 | Unknown/blank | - | raw carve fallback (258 signatures, tiered validation) | **Working, tested** |
 
-Stub engines are registered so their absence is visible, but they never
-claim a source (`ProbeOutcome::No`); the UI never presents them as
-supported. Real engines land one at a time, each validated against
-fixtures and real volumes before the matrix changes.
+Nothing else is claimed. Btrfs, ReFS and ZFS are **not implemented**:
+the reference product does ship real engines for them (verified during
+clean-room RE - see `open-recovery-wizard/docs/08-driver-and-module-re.md`),
+and ours will land the same way, one at a time, each validated against
+fixtures and real volumes before the matrix changes. Until then there
+is no stub crate to find: absent means absent.
+
+ext4 journal-based deleted-dirent recovery (jbd2) is likewise a
+documented roadmap item, not a present feature.
 
 ### Safety properties
 
@@ -68,10 +70,7 @@ data-wizard-rs/
 │   ├── dw-exfat/        # exFAT parser (FAT + directory bitmap + stream extensions)
 │   ├── dw-ext/          # ext2/3/4 parser (group descriptors + inode tables + extents)
 │   ├── dw-hfs/          # HFS+ parser (B-tree catalog + extents overflow)
-│   ├── dw-btrfs/        # Btrfs parser (chunk tree + root tree + checksum tree)
-│   ├── dw-refs/         # ReFS parser (metadata table + object ID index)
-│   ├── dw-zfs/          # ZFS parser (vdev label + uberblock + DMU object set)
-│   ├── dw-signature/    # file signature DB (rebuilt from public sources — NOT extracted)
+│   ├── dw-signatures/   # file signature DB (rebuilt from public sources — NOT extracted)
 │   ├── dw-carver/       # raw file carving engine (header/footer + bifragment gap)
 │   └── dw-ipc/          # types shared between Rust core and Tauri/React
 ├── src-tauri/           # Tauri 2 shell + command handlers
