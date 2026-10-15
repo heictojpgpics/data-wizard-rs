@@ -29,7 +29,7 @@ uuid         = { workspace = true }
 time         = { workspace = true }
 bytesize     = { workspace = true }
 bytemuck     = { workspace = true }
-fs4          = "0.13"
+fs4          = "1.1"
 tempfile     = { workspace = true }
 
 [dev-dependencies]
