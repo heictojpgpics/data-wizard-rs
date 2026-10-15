@@ -1,32 +1,29 @@
 //! NTFS MFT walker — the core metadata scan.
 //!
 //! This module implements the "quick scan" phase for NTFS: walk every
-//! MFT record, extract file names + data runs, and build
-//! [`RecoveredEntry`]s that get appended to the [`ResultsStore`].
+//! MFT record, extract file names + data runs, resolve directory
+//! hierarchy, and build [`RecoveredEntry`]s that get appended to the
+//! [`ResultsStore`].
 //!
 //! Algorithm (clean-room, derived from public MS-NTFS spec + Linux
 //! kernel `fs/ntfs3/` + libntfs-3g; see `docs/algorithms/ntfs-recovery.md`):
 //!
 //! 1. Read the VBR to get the MFT offset, record size, and cluster size.
 //! 2. Read MFT record 0 (the $MFT file itself). Parse its $DATA attribute
-//!    to get the full MFT's cluster chain (the MFT is itself fragmented
-//!    and describes its own layout).
-//! 3. Iterate every MFT record number from 0 to the highest record
-//!    number reachable via $MFT's $DATA runs.
-//!    - For each record, read its bytes (handling the fact that the MFT
-//!      may be fragmented across multiple runs).
-//!    - Parse the FILE record (with USN fixup).
-//!    - Skip records that aren't FILE records (e.g. zero-filled free
-//!      records — they'll fail magic check).
-//!    - Extract the first Win32-namespace $FILE_NAME attribute to get
-//!      the file's name and parent directory.
-//!    - Extract the $DATA attribute to get the file's size and cluster
-//!      chain (decode the run list).
-//!    - Build a `RecoveredEntry` and append it to the results store.
-//!    - Deleted records (in-use bit clear) are STILL processed — their
-//!      $FILE_NAME and $DATA attributes are often intact.
-//! 4. Emit progress events periodically (every N records).
+//!    to get the full MFT's cluster chain.
+//! 3. **Pass 1** — Walk every MFT record, collect into an in-memory `Vec`:
+//!    - record_number
+//!    - parent_record_number (from $FILE_NAME)
+//!    - name (from $FILE_NAME)
+//!    - file_size + cluster_chain (from $DATA)
+//!    - timestamps, deleted flag, is_directory flag
+//! 4. **Path resolution** — Build a `record → (parent, name)` map, then
+//!    for each entry, walk up the parent chain to build the full path.
+//!    Cycles are detected and broken (corrupt MFT can have cycles).
+//! 5. **Pass 2** — Insert resolved entries into the `ResultsStore`.
+//! 6. Emit progress events throughout.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tracing::{info, trace, warn};
@@ -64,21 +61,24 @@ impl Default for WalkConfig {
     }
 }
 
+/// In-memory record collected during pass 1.
+struct CollectedRecord {
+    record_number: u64,
+    parent_record_number: u64,
+    name: String,
+    file_size: u64,
+    cluster_chain: Vec<u64>,
+    is_deleted: bool,
+    #[allow(dead_code)]
+    is_directory: bool,
+    mtime: Option<time::OffsetDateTime>,
+    ctime: Option<time::OffsetDateTime>,
+}
+
 /// Walk the MFT and append every recoverable entry to `results`.
 ///
 /// This is the "quick scan" phase for NTFS. It does NOT do raw carving
 /// (that's the "deep scan" phase, handled by `dw-carver`).
-///
-/// # Arguments
-///
-/// * `source` - The disk source to read from. Must also be usable as a
-///   [`dw_disk::ReadAt`] via `as_read_at()`.
-/// * `vbr` - The parsed NTFS VBR (from the probe phase).
-/// * `mode` - Quick or Deep scan mode (the walker only does the metadata
-///   walk; deep mode just means carving will follow).
-/// * `results` - The results store to append to.
-/// * `progress` - The progress sink to emit events to.
-/// * `config` - Walker configuration.
 pub async fn walk_mft(
     source: Arc<dyn DiskSource>,
     vbr: &Vbr,
@@ -124,7 +124,6 @@ pub async fn walk_mft(
     let mft_record = FileRecord::parse(&record_buf, record_size)
         .map_err(|e| CoreError::Plugin(format!("parse $MFT record 0: {e}")))?;
 
-    // Find $MFT's own $DATA attribute (non-resident) to get its run list.
     let mft_data = mft_record
         .data_attribute()
         .ok_or_else(|| CoreError::Plugin("$MFT has no $DATA attribute".into()))?;
@@ -139,15 +138,13 @@ pub async fn walk_mft(
         }
     };
 
-    // Compute total number of MFT records from $MFT's data size.
     let mft_total_bytes: u64 =
         mft_runs.iter().map(|r| r.length).sum::<u64>() * u64::from(vbr.bytes_per_cluster);
     let total_records = mft_total_bytes / u64::from(vbr.mft_record_size_bytes);
     info!(total_records, "MFT record count from $MFT $DATA");
 
-    // Build a run-position index so we can map an absolute MFT byte offset
-    // to (run_index, offset_within_run).
-    let mut run_boundaries: Vec<(u64, u64, u64)> = Vec::new(); // (start_byte, end_byte, disk_offset)
+    // Build a run-position index for mapping MFT byte offsets to disk offsets.
+    let mut run_boundaries: Vec<(u64, u64, u64)> = Vec::new();
     let mut cursor = 0u64;
     for run in &mft_runs {
         let len_bytes = run.length * u64::from(vbr.bytes_per_cluster);
@@ -170,39 +167,31 @@ pub async fn walk_mft(
     info!(
         total_records_to_walk,
         include_deleted = config.include_deleted,
-        "Beginning MFT record iteration"
+        "Beginning MFT record iteration (pass 1: collect)"
     );
 
+    // ---- Pass 1: Collect all records into memory ----
+    let mut collected: Vec<CollectedRecord> = Vec::new();
     let mut records_processed: u64 = 0;
-    let mut entries_emitted: u64 = 0;
     let mut errors: u64 = 0;
 
     for record_number in 0..total_records_to_walk {
-        // Map record_number → absolute MFT byte offset
         let mft_byte_offset = record_number * u64::from(vbr.mft_record_size_bytes);
 
-        // Find the run that contains this offset
         let disk_offset = match locate_in_runs(&run_boundaries, mft_byte_offset) {
             Some(off) => off + mft_offset,
-            None => {
-                // This record is in a sparse region of $MFT — skip.
-                continue;
-            }
+            None => continue,
         };
 
-        // Read the record
         if let Err(e) = read_at.read_at(disk_offset, &mut record_buf) {
             trace!(record_number, error = %e, "Failed to read MFT record");
             errors += 1;
             continue;
         }
 
-        // Parse it. Most free records will fail the magic check — that's normal.
         let record = match FileRecord::parse(&record_buf, record_size) {
             Ok(r) => r,
             Err(NtfsError::Corrupt(msg)) => {
-                // Free/zero-filled records produce "bad magic" — that's fine.
-                // Anything else is worth a debug log.
                 if !msg.starts_with("MFT record bad magic") {
                     trace!(record_number, error = %msg, "MFT record parse error");
                 }
@@ -215,8 +204,6 @@ pub async fn walk_mft(
             }
         };
 
-        // Skip extension records (base_record_reference != 0) — their info
-        // is attributed to the base record.
         if record.base_record_reference != 0 {
             continue;
         }
@@ -226,51 +213,88 @@ pub async fn walk_mft(
             continue;
         }
 
-        // Extract the best file name (prefer Win32 namespace, fall back to DOS).
-        let file_name = pick_best_file_name(&record);
-        if file_name.is_none() {
-            // No name — probably a system file with only $OBJECT_ID. Skip.
-            continue;
-        }
-        let file_name = file_name.unwrap();
+        let file_name = match pick_best_file_name(&record) {
+            Some(fn_) => fn_,
+            None => continue,
+        };
 
-        // Extract $DATA attribute (may be absent for directories).
-        let data_attr = record.data_attribute();
-        let (file_size, cluster_chain) = match data_attr {
-            Some(attr) => {
-                match &attr.data {
-                    crate::mft::AttributeData::Resident { content } => {
-                        // Small file: data is inline in the MFT record.
-                        (content.len() as u64, Vec::new())
-                    }
-                    crate::mft::AttributeData::NonResident {
-                        run_list,
-                        real_size,
-                        ..
-                    } => {
-                        let runs = decode_run_list(run_list).unwrap_or_default();
-                        let chain: Vec<u64> = runs.iter().filter_map(|r| r.offset).collect();
-                        (*real_size, chain)
-                    }
+        let (file_size, cluster_chain) = match record.data_attribute() {
+            Some(attr) => match &attr.data {
+                crate::mft::AttributeData::Resident { content } => {
+                    (content.len() as u64, Vec::new())
                 }
-            }
-            None => {
-                // Directory or metadata file with no $DATA — size is 0.
-                (0, Vec::new())
-            }
+                crate::mft::AttributeData::NonResident {
+                    run_list,
+                    real_size,
+                    ..
+                } => {
+                    let runs = decode_run_list(run_list).unwrap_or_default();
+                    let chain: Vec<u64> = runs.iter().filter_map(|r| r.offset).collect();
+                    (*real_size, chain)
+                }
+            },
+            None => (0, Vec::new()),
         };
 
-        // Build the recovered entry.
-        let parent_path = if file_name.is_in_root() {
-            String::from("\\")
-        } else {
-            // We don't yet have the full parent path resolution (would
-            // require building a record→path map). Use the parent record
-            // number as a placeholder; a follow-up pass can resolve paths.
-            format!("\\[parent-{}]", file_name.parent_record_number)
-        };
+        collected.push(CollectedRecord {
+            record_number,
+            parent_record_number: file_name.parent_record_number,
+            name: file_name.name.clone(),
+            file_size,
+            cluster_chain,
+            is_deleted,
+            is_directory: record.is_directory(),
+            mtime: file_name.modification_time,
+            ctime: file_name.creation_time,
+        });
 
-        let extension = file_name
+        records_processed += 1;
+
+        if records_processed.is_multiple_of(u64::from(config.progress_interval)) {
+            progress
+                .emit(ProgressEvent {
+                    scan_id,
+                    phase: ProgressPhase::QuickScan,
+                    current: records_processed,
+                    total: total_records_to_walk,
+                    message: format!(
+                        "Pass 1: walked {records_processed}/{total_records_to_walk} records, {} collected",
+                        collected.len()
+                    ),
+                })
+                .await;
+        }
+    }
+
+    info!(
+        records_processed,
+        collected = collected.len(),
+        errors,
+        "Pass 1 complete, resolving paths"
+    );
+
+    // ---- Path resolution: build record → (parent, name) map ----
+    let mut parent_map: HashMap<u64, (u64, &str)> = HashMap::with_capacity(collected.len());
+    for r in &collected {
+        parent_map.insert(r.record_number, (r.parent_record_number, r.name.as_str()));
+    }
+
+    // ---- Pass 2: Resolve paths and insert into results ----
+    progress
+        .emit(ProgressEvent {
+            scan_id,
+            phase: ProgressPhase::Finalizing,
+            current: 0,
+            total: collected.len() as u64,
+            message: format!("Resolving paths for {} entries", collected.len()),
+        })
+        .await;
+
+    let mut entries_emitted: u64 = 0;
+    for r in &collected {
+        let parent_path = resolve_path(r.record_number, &parent_map);
+
+        let extension = r
             .name
             .rsplit_once('.')
             .map(|(_, ext)| ext.to_lowercase())
@@ -280,44 +304,24 @@ pub async fn walk_mft(
             id: RecoveredEntryId(Uuid::now_v7()),
             fs_kind: "ntfs".to_string(),
             parent_path,
-            name: file_name.name.clone(),
-            size: file_size,
-            start_lba: cluster_chain.first().copied(),
-            mtime: file_name.modification_time,
-            ctime: file_name.creation_time,
+            name: r.name.clone(),
+            size: r.file_size,
+            start_lba: r.cluster_chain.first().copied(),
+            mtime: r.mtime,
+            ctime: r.ctime,
             status: RecoveryStatus::Intact,
             extension,
             mime: None,
             confidence: 1000,
-            was_deleted: is_deleted,
-            cluster_chain,
+            was_deleted: r.is_deleted,
+            cluster_chain: r.cluster_chain.clone(),
         };
 
         results.insert(entry);
         entries_emitted += 1;
-
-        records_processed += 1;
-
-        // Emit progress periodically
-        if records_processed.is_multiple_of(u64::from(config.progress_interval)) {
-            progress
-                .emit(ProgressEvent {
-                    scan_id,
-                    phase: ProgressPhase::QuickScan,
-                    current: records_processed,
-                    total: total_records_to_walk,
-                    message: format!(
-                        "Walked {records_processed}/{total_records_to_walk} MFT records, {entries_emitted} entries found"
-                    ),
-                })
-                .await;
-        }
     }
 
-    info!(
-        records_processed,
-        entries_emitted, errors, "MFT walk complete"
-    );
+    info!(entries_emitted, "MFT walk complete");
 
     progress
         .emit(ProgressEvent {
@@ -330,6 +334,78 @@ pub async fn walk_mft(
         .await;
 
     Ok(entries_emitted)
+}
+
+/// Resolve the full path of a record by walking up the parent chain.
+///
+/// The root directory (record 5) has parent = 5 (self-referential), which
+/// terminates the recursion.
+///
+/// Cycles are detected via a visited set — if we revisit a record, we
+/// stop and return the path accumulated so far (prefixed with `\[cycle]`).
+fn resolve_path(record_number: u64, parent_map: &HashMap<u64, (u64, &str)>) -> String {
+    const ROOT_RECORD: u64 = 5;
+    const MAX_DEPTH: u32 = 64;
+
+    let mut components: Vec<&str> = Vec::new();
+    let mut current = record_number;
+    let mut visited = Vec::with_capacity(16);
+    let mut depth: u32 = 0;
+
+    loop {
+        if depth >= MAX_DEPTH {
+            warn!(record_number, depth, "Path resolution exceeded max depth");
+            break;
+        }
+
+        // Check for cycle
+        if visited.contains(&current) {
+            warn!(
+                record_number,
+                cycle_at = current,
+                "Cycle detected in parent chain"
+            );
+            // Return what we have so far with a cycle marker
+            components.reverse();
+            if components.is_empty() {
+                return String::from("\\[cycle]");
+            }
+            return format!("\\[cycle]\\{}", components.join("\\"));
+        }
+        visited.push(current);
+
+        let Some((parent, name)) = parent_map.get(&current) else {
+            // Parent not in our map — this record's parent was deleted or
+            // we didn't collect it. Return what we have with a placeholder.
+            components.reverse();
+            if components.is_empty() {
+                return format!("\\[orphan-{current}]");
+            }
+            return format!("\\[orphan]\\{}", components.join("\\"));
+        };
+
+        if current == ROOT_RECORD {
+            // Root directory — stop here.
+            break;
+        }
+
+        if *parent == ROOT_RECORD {
+            // Parent is root — the name goes in the path, then stop.
+            components.push(name);
+            break;
+        }
+
+        components.push(name);
+        current = *parent;
+        depth += 1;
+    }
+
+    components.reverse();
+    if components.is_empty() {
+        String::from("\\")
+    } else {
+        format!("\\{}", components.join("\\"))
+    }
 }
 
 /// Pick the best `$FILE_NAME` attribute from a record.
@@ -367,9 +443,6 @@ fn pick_best_file_name(record: &FileRecord) -> Option<FileName> {
 }
 
 /// Locate an absolute MFT byte offset within the run boundaries.
-///
-/// Returns the disk byte offset (relative to the start of the volume)
-/// where the requested MFT byte lives.
 fn locate_in_runs(run_boundaries: &[(u64, u64, u64)], mft_byte_offset: u64) -> Option<u64> {
     for &(start, end, disk_off) in run_boundaries {
         if mft_byte_offset >= start && mft_byte_offset < end {
@@ -400,7 +473,6 @@ mod tests {
 
     #[test]
     fn locate_in_runs_returns_none_for_gap() {
-        // Simulate a sparse MFT: run 0 covers 0..1000, run 2 covers 2000..3000
         let runs = vec![(0, 1000, 10_000), (2000, 3000, 30_000)];
         assert_eq!(locate_in_runs(&runs, 1500), None);
     }
@@ -409,5 +481,74 @@ mod tests {
     fn locate_in_runs_returns_none_for_empty() {
         let runs: Vec<(u64, u64, u64)> = vec![];
         assert_eq!(locate_in_runs(&runs, 0), None);
+    }
+
+    #[test]
+    fn resolve_path_root_file() {
+        // File in root: record 100, parent = 5 (root), name = "test.txt"
+        let mut map = HashMap::new();
+        map.insert(100u64, (5u64, "test.txt"));
+        map.insert(5u64, (5u64, "."));
+        let path = resolve_path(100, &map);
+        assert_eq!(path, "\\test.txt");
+    }
+
+    #[test]
+    fn resolve_path_nested_file() {
+        // File in C:\Users\alice\doc.txt
+        // record 5 = root, 10 = Users, 20 = alice, 30 = doc.txt
+        let mut map = HashMap::new();
+        map.insert(5u64, (5u64, "."));
+        map.insert(10u64, (5u64, "Users"));
+        map.insert(20u64, (10u64, "alice"));
+        map.insert(30u64, (20u64, "doc.txt"));
+        let path = resolve_path(30, &map);
+        assert_eq!(path, "\\Users\\alice\\doc.txt");
+    }
+
+    #[test]
+    fn resolve_path_deeply_nested() {
+        // 5 → 10 → 20 → 30 → 40 → 50 (deeply nested)
+        let mut map = HashMap::new();
+        map.insert(5u64, (5u64, "."));
+        map.insert(10u64, (5u64, "a"));
+        map.insert(20u64, (10u64, "b"));
+        map.insert(30u64, (20u64, "c"));
+        map.insert(40u64, (30u64, "d"));
+        map.insert(50u64, (40u64, "file.txt"));
+        let path = resolve_path(50, &map);
+        assert_eq!(path, "\\a\\b\\c\\d\\file.txt");
+    }
+
+    #[test]
+    fn resolve_path_handles_orphan() {
+        // Parent not in map
+        let mut map = HashMap::new();
+        map.insert(100u64, (999u64, "orphan.txt"));
+        // 999 is not in the map
+        let path = resolve_path(100, &map);
+        assert!(path.starts_with("\\[orphan"));
+    }
+
+    #[test]
+    fn resolve_path_detects_cycle() {
+        // 10 → 20 → 10 (cycle)
+        let mut map = HashMap::new();
+        map.insert(5u64, (5u64, "."));
+        map.insert(10u64, (20u64, "a"));
+        map.insert(20u64, (10u64, "b"));
+        let path = resolve_path(10, &map);
+        assert!(
+            path.contains("cycle"),
+            "path should contain 'cycle': {path}"
+        );
+    }
+
+    #[test]
+    fn resolve_path_root_itself() {
+        let mut map = HashMap::new();
+        map.insert(5u64, (5u64, "."));
+        let path = resolve_path(5, &map);
+        assert_eq!(path, "\\");
     }
 }
