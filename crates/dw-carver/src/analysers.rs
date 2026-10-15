@@ -58,17 +58,22 @@ pub enum AnalyserKind {
     Jpeg,
     Png,
     Zip,
+    Mp4,
+    Pe,
 }
 
 /// Map a file extension to its analyser. All ZIP-based container formats
 /// (jar, apk, docx, xlsx, pptp family, odf, epub, ...) validate through
-/// the ZIP EOCD walk.
+/// the ZIP EOCD walk. MP4 covers the ISO-BMFF family (m4v, mov uses the
+/// same box grammar but different brand - kept separate to stay honest).
 pub fn analyser_for(extension: &str) -> Option<AnalyserKind> {
     match extension {
         "jpg" | "jpeg" => Some(AnalyserKind::Jpeg),
         "png" => Some(AnalyserKind::Png),
         "zip" | "jar" | "apk" | "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp" | "epub"
         | "ipa" | "wal" => Some(AnalyserKind::Zip),
+        "mp4" | "m4v" | "m4a" => Some(AnalyserKind::Mp4),
+        "exe" | "dll" | "sys" | "scr" => Some(AnalyserKind::Pe),
         _ => None,
     }
 }
@@ -80,6 +85,8 @@ pub fn analyse(kind: AnalyserKind, buf: &[u8]) -> AnalyserOutcome {
         AnalyserKind::Jpeg => analyse_jpeg(buf),
         AnalyserKind::Png => analyse_png(buf),
         AnalyserKind::Zip => analyse_zip(buf),
+        AnalyserKind::Mp4 => analyse_mp4(buf),
+        AnalyserKind::Pe => analyse_pe(buf),
     }
 }
 
@@ -258,6 +265,178 @@ fn analyse_zip(buf: &[u8]) -> AnalyserOutcome {
     }
     // EOCD not in buffer yet.
     AnalyserOutcome::NeedMore
+}
+
+// ---------------------------------------------------------------------------
+// MP4 / ISO-BMFF
+// ---------------------------------------------------------------------------
+
+const MP4_FTYP: [u8; 4] = *b"ftyp";
+/// Box types that terminate the walk with "extends to EOF" semantics.
+/// (size == 0 box: everything to the end of the file belongs to it.)
+const MP4_HINT_BOXES: [&[u8; 4]; 4] = [b"mdat", b"free", b"skip", b"sidx"];
+/// Hard cap on the number of boxes (guards against corrupt size chains).
+const MP4_MAX_BOXES: usize = 4096;
+
+/// Walk ISO-BMFF boxes.
+///
+/// Grammar (ISO/IEC 14496-12): each box = `size u32 BE` + `type 4CC`;
+/// size 1 -> 64-bit largesize follows; size 0 -> box extends to EOF.
+/// A candidate is Validated when the box chain ends exactly at a
+/// boundary AND the first box is a plausible type (ftyp/mdat/moov/free).
+/// A size-0 box means "to EOF": for carving that is the honest
+/// TruncatedAtCap tier (we cannot know the true file end), handled by
+/// the caller via NeedMore -> cap.
+fn analyse_mp4(buf: &[u8]) -> AnalyserOutcome {
+    if buf.len() < 8 {
+        return AnalyserOutcome::NeedMore;
+    }
+    // Sanity: the first box type should be a known top-level type.
+    let first_type = &buf[4..8];
+    let plausible_first = first_type == MP4_FTYP
+        || first_type == b"moov"
+        || first_type == b"mdat"
+        || first_type == b"free"
+        || first_type == b"skip"
+        || first_type == b"wide";
+    if !plausible_first {
+        return AnalyserOutcome::Invalid;
+    }
+
+    let mut pos: usize = 0;
+    let mut boxes = 0usize;
+    loop {
+        if pos + 8 > buf.len() {
+            return AnalyserOutcome::NeedMore;
+        }
+        let size = u32::from_be_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]) as u64;
+
+        if size == 0 {
+            // Extends to EOF: honest truncated tier.
+            return AnalyserOutcome::NeedMore;
+        }
+        if size == 1 {
+            // 64-bit largesize.
+            if pos + 16 > buf.len() {
+                return AnalyserOutcome::NeedMore;
+            }
+            let largesize = u64::from_be_bytes(buf[pos + 8..pos + 16].try_into().expect("8 bytes"));
+            if largesize < 16 {
+                return AnalyserOutcome::Invalid;
+            }
+            let end = pos as u64 + largesize;
+            if end > buf.len() as u64 {
+                return AnalyserOutcome::NeedMore;
+            }
+            pos = end as usize;
+        } else {
+            if size < 8 {
+                return AnalyserOutcome::Invalid;
+            }
+            let end = pos as u64 + size;
+            if end > buf.len() as u64 {
+                return AnalyserOutcome::NeedMore;
+            }
+            // Well-known size-0-style "payload to EOF" boxes are fine
+            // when their declared size fits; unknown types only invalidate
+            // when the payload size chain breaks (already covered above).
+            let _ = MP4_HINT_BOXES;
+            pos = end as usize;
+        }
+        boxes += 1;
+        if boxes > MP4_MAX_BOXES {
+            return AnalyserOutcome::Invalid;
+        }
+        if pos == buf.len() {
+            // Box chain consumed the buffer exactly.
+            return AnalyserOutcome::Validated(pos as u64);
+        }
+        if pos > buf.len() {
+            return AnalyserOutcome::Invalid; // unreachable; belt+braces
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PE (COFF) - the role the reference product's PE_Tools fills
+// ---------------------------------------------------------------------------
+
+const PE_SIG: [u8; 4] = *b"PE\0\0";
+
+/// Validate a PE image and compute its file end.
+///
+/// Layout (MS PE/COFF spec): MZ @0; e_lfanew u32 @0x3C -> PE\0\0;
+/// FileHeader (20 bytes) at e_lfanew+4 (NumberOfSections @+2 of header,
+/// SizeOfOptionalHeader @+16); OptionalHeader at e_lfanew+24;
+/// section table follows; the file's data ends at the last section's
+/// PointerToRawData + SizeOfRawData (aligned up to FileAlignment).
+/// Validated end = that maximum, rounded up to 512 (file alignment is
+/// usually 512; the on-disk file can carry alignment padding).
+fn analyse_pe(buf: &[u8]) -> AnalyserOutcome {
+    if buf.len() < 0x40 {
+        return AnalyserOutcome::NeedMore;
+    }
+    if &buf[..2] != b"MZ" {
+        return AnalyserOutcome::Invalid;
+    }
+    let e_lfanew = u32::from_le_bytes([buf[0x3C], buf[0x3D], buf[0x3E], buf[0x3F]]) as usize;
+    // e_lfanew must land inside the DOS stub and be aligned to 4/8; cap
+    // at 64 KiB (DOS stub with padding can be large but never huge).
+    if !(0x40..=0x10000).contains(&e_lfanew) || e_lfanew + 24 + 20 > buf.len() {
+        if e_lfanew > 0x10000 {
+            return AnalyserOutcome::Invalid;
+        }
+        return AnalyserOutcome::NeedMore;
+    }
+    if buf[e_lfanew..e_lfanew + 4] != PE_SIG {
+        return AnalyserOutcome::Invalid;
+    }
+    // FileHeader @ e_lfanew+4:
+    let fh = e_lfanew + 4;
+    let machine = u16::from_le_bytes([buf[fh], buf[fh + 1]]);
+    let num_sections = u16::from_le_bytes([buf[fh + 2], buf[fh + 3]]) as usize;
+    let size_opt = u16::from_le_bytes([buf[fh + 16], buf[fh + 17]]) as usize;
+    if machine == 0 || num_sections == 0 || num_sections > 96 {
+        return AnalyserOutcome::Invalid;
+    }
+    if size_opt < 64 {
+        return AnalyserOutcome::Invalid;
+    }
+    // OptionalHeader @ e_lfanew+24: sanity on magic (0x10b PE32, 0x20b PE32+).
+    let oh = e_lfanew + 24;
+    if oh + 2 > buf.len() {
+        return AnalyserOutcome::NeedMore;
+    }
+    let magic = u16::from_le_bytes([buf[oh], buf[oh + 1]]);
+    if magic != 0x10B && magic != 0x20B {
+        return AnalyserOutcome::Invalid;
+    }
+    // Section table @ oh + size_opt; each entry 40 bytes.
+    let sec_table = oh + size_opt;
+    if sec_table + num_sections * 40 > buf.len() {
+        return AnalyserOutcome::NeedMore;
+    }
+    let mut end: u64 = 0;
+    for i in 0..num_sections {
+        let e = sec_table + i * 40;
+        // PointerToRawData @+20, SizeOfRawData @+16.
+        let ptr = u32::from_le_bytes([buf[e + 20], buf[e + 21], buf[e + 22], buf[e + 23]]) as u64;
+        let sz = u32::from_le_bytes([buf[e + 16], buf[e + 17], buf[e + 18], buf[e + 19]]) as u64;
+        if sz == 0 {
+            continue;
+        }
+        end = end.max(ptr + sz);
+    }
+    if end == 0 {
+        return AnalyserOutcome::Invalid; // no raw data at all
+    }
+    // Round up to 512 (typical file alignment padding).
+    let end_aligned = end.div_ceil(512) * 512;
+    let end_aligned = end_aligned.min(buf.len() as u64);
+    if end_aligned < 0x200 {
+        return AnalyserOutcome::Invalid;
+    }
+    AnalyserOutcome::Validated(end_aligned)
 }
 
 #[cfg(test)]
@@ -476,6 +655,122 @@ mod tests {
         assert_eq!(analyse(AnalyserKind::Zip, &v), AnalyserOutcome::NeedMore);
     }
 
+    // ---- MP4 ----
+
+    fn minimal_mp4(ftyp_size: u32, payload: usize) -> Vec<u8> {
+        // ftyp box then an mdat box.
+        let mut v = Vec::new();
+        v.extend_from_slice(&ftyp_size.to_be_bytes());
+        v.extend_from_slice(b"ftyp");
+        v.extend_from_slice(b"isom"); // major brand
+        v.extend_from_slice(&0u32.to_be_bytes()); // minor version
+        v.extend_from_slice(b"isomiso2avc1mp41"); // compatible brands (16 bytes)
+        let ftyp_len = 8 + 4 + 4 + 16;
+        assert_eq!(ftyp_len as u32, ftyp_size);
+        let mdat_size = (8 + payload) as u32;
+        v.extend_from_slice(&mdat_size.to_be_bytes());
+        v.extend_from_slice(b"mdat");
+        v.extend_from_slice(&vec![0x42u8; payload]);
+        v
+    }
+
+    #[test]
+    fn mp4_validated_when_box_chain_ends_exactly() {
+        let mp4 = minimal_mp4(32, 100);
+        match analyse(AnalyserKind::Mp4, &mp4) {
+            AnalyserOutcome::Validated(end) => assert_eq!(end as usize, mp4.len()),
+            other => panic!("expected Validated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mp4_size0_box_is_need_more() {
+        let mut v = minimal_mp4(32, 0);
+        // Replace the mdat box with a size-0 box (extends to EOF).
+        let mdat_at = 32;
+        v[mdat_at..mdat_at + 4].copy_from_slice(&0u32.to_be_bytes());
+        assert_eq!(analyse(AnalyserKind::Mp4, &v), AnalyserOutcome::NeedMore);
+    }
+
+    #[test]
+    fn mp4_bad_first_box_is_invalid() {
+        let mut v = minimal_mp4(32, 10);
+        v[4..8].copy_from_slice(b"XXXX"); // unknown first type
+        assert_eq!(analyse(AnalyserKind::Mp4, &v), AnalyserOutcome::Invalid);
+    }
+
+    #[test]
+    fn mp4_box_size_below_8_is_invalid() {
+        let mut v = minimal_mp4(32, 10);
+        // Second box size = 4 (below the 8-byte box header minimum).
+        let mdat_at = 32;
+        v[mdat_at..mdat_at + 4].copy_from_slice(&4u32.to_be_bytes());
+        assert_eq!(analyse(AnalyserKind::Mp4, &v), AnalyserOutcome::Invalid);
+    }
+
+    // ---- PE ----
+
+    fn minimal_pe(num_sections: usize, raw_size: u32) -> Vec<u8> {
+        let mut v = vec![0u8; 0x1000];
+        v[0..2].copy_from_slice(b"MZ");
+        let e_lfanew = 0x80usize;
+        v[0x3C..0x40].copy_from_slice(&(e_lfanew as u32).to_le_bytes());
+        v[e_lfanew..e_lfanew + 4].copy_from_slice(b"PE\0\0");
+        let fh = e_lfanew + 4;
+        v[fh..fh + 2].copy_from_slice(&0x8664u16.to_le_bytes()); // machine amd64
+        v[fh + 2..fh + 4].copy_from_slice(&(num_sections as u16).to_le_bytes());
+        v[fh + 16..fh + 18].copy_from_slice(&240u16.to_le_bytes()); // sizeof opt hdr
+        let oh = e_lfanew + 24;
+        v[oh..oh + 2].copy_from_slice(&0x20Bu16.to_le_bytes()); // PE32+ magic
+        // sections at oh+240
+        let sec = oh + 240;
+        for i in 0..num_sections {
+            let e = sec + i * 40;
+            v[e..e + 8].copy_from_slice(b".text\0\0\0");
+            // VirtualSize @+8, VirtualAddress @+12 (zeros fine)
+            v[e + 16..e + 20].copy_from_slice(&raw_size.to_le_bytes()); // SizeOfRawData
+            v[e + 20..e + 24].copy_from_slice(&0x400u32.to_le_bytes()); // PointerToRawData
+        }
+        // Raw data at 0x400..0x400+raw_size
+        let total = 0x400 + raw_size as usize;
+        v.resize(total.max(0x1000), 0);
+        v
+    }
+
+    #[test]
+    fn pe_validated_to_section_end() {
+        let pe = minimal_pe(1, 0x600);
+        match analyse(AnalyserKind::Pe, &pe) {
+            AnalyserOutcome::Validated(end) => {
+                // end = 0x400+0x600 = 0xA00 aligned to 512 = 0xA00.
+                assert_eq!(end, 0xA00);
+            }
+            other => panic!("expected Validated, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pe_rejects_bad_dos_or_pe_sig() {
+        let mut pe = minimal_pe(1, 0x200);
+        pe[1] = b'X'; // not MZ
+        assert_eq!(analyse(AnalyserKind::Pe, &pe), AnalyserOutcome::Invalid);
+        let mut pe = minimal_pe(1, 0x200);
+        pe[0x80 + 1] = b'Q'; // not PE\0\0
+        assert_eq!(analyse(AnalyserKind::Pe, &pe), AnalyserOutcome::Invalid);
+    }
+
+    #[test]
+    fn pe_rejects_zero_sections() {
+        let pe = minimal_pe(0, 0x200);
+        assert_eq!(analyse(AnalyserKind::Pe, &pe), AnalyserOutcome::Invalid);
+    }
+
+    #[test]
+    fn pe_short_buffer_is_need_more() {
+        let v = vec![0u8; 0x30];
+        assert_eq!(analyse(AnalyserKind::Pe, &v), AnalyserOutcome::NeedMore);
+    }
+
     // ---- dispatch ----
 
     #[test]
@@ -486,7 +781,10 @@ mod tests {
         assert_eq!(analyser_for("zip"), Some(AnalyserKind::Zip));
         assert_eq!(analyser_for("docx"), Some(AnalyserKind::Zip));
         assert_eq!(analyser_for("apk"), Some(AnalyserKind::Zip));
-        assert_eq!(analyser_for("exe"), None);
+        assert_eq!(analyser_for("exe"), Some(AnalyserKind::Pe));
+        assert_eq!(analyser_for("mp4"), Some(AnalyserKind::Mp4));
+        assert_eq!(analyser_for("m4v"), Some(AnalyserKind::Mp4));
         assert_eq!(analyser_for("gif"), None); // not yet — GIF analyser is planned
+        assert_eq!(analyser_for("elf"), None); // no ELF structure walk yet
     }
 }

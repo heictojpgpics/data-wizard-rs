@@ -540,11 +540,59 @@ mod tests {
     }
 
     #[test]
-    fn carve_emits_unvalidated_tier_for_exe() {
-        // MZ header with no validation path: tier 4, size 0.
+    fn carve_validates_pe_with_exact_end() {
+        // A well-formed minimal PE: analyser computes the section end.
+        let mut pe = vec![0u8; 0x1000];
+        pe[0..2].copy_from_slice(b"MZ");
+        pe[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        pe[0x84..0x86].copy_from_slice(&0x8664u16.to_le_bytes()); // machine
+        pe[0x86..0x88].copy_from_slice(&1u16.to_le_bytes()); // sections
+        pe[0x84 + 16..0x84 + 18].copy_from_slice(&240u16.to_le_bytes()); // opt size
+        pe[0x80 + 24..0x80 + 26].copy_from_slice(&0x20Bu16.to_le_bytes()); // PE32+
+        // section @ opt+240: raw data 0x400..0xA00
+        let sec = 0x80 + 24 + 240;
+        pe[sec + 16..sec + 20].copy_from_slice(&0x600u32.to_le_bytes()); // SizeOfRawData
+        pe[sec + 20..sec + 24].copy_from_slice(&0x400u32.to_le_bytes()); // PointerToRawData
+        pe.resize(0xA00, 0);
+
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), &pe).unwrap();
+        let source = FileBackedSource::open(temp.path()).unwrap();
+        let read_at = source.as_read_at();
+        let db = SignatureDb::from_embedded();
+        let results = ResultsStore::new(1000, None);
+
+        carve_region(
+            read_at.as_ref(),
+            0,
+            pe.len() as u64,
+            &db,
+            &results,
+            &no_progress(),
+            Uuid::nil(),
+            4096,
+        )
+        .unwrap();
+
+        let snapshot = results.snapshot();
+        let exe = snapshot
+            .iter()
+            .find(|e| e.extension == "exe" && e.status == RecoveryStatus::CarvedValidated)
+            .expect("PE-validated exe entry");
+        assert_eq!(exe.size, 0xA00);
+        assert_eq!(exe.extents.len(), 1);
+        assert_eq!(exe.extents[0].length, 0xA00);
+    }
+
+    #[test]
+    fn carve_emits_unvalidated_tier_for_elf() {
+        // ELF header: no analyser, no footer -> tier 4 marker (size 0).
         let mut data = vec![0u8; 4096];
-        data[200] = b'M';
-        data[201] = b'Z';
+        data[200] = 0x7F;
+        data[201] = b'E';
+        data[202] = b'L';
+        data[203] = b'F';
 
         let temp = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(temp.path(), &data).unwrap();
@@ -566,13 +614,13 @@ mod tests {
         .unwrap();
 
         let snapshot = results.snapshot();
-        let exe = snapshot
+        let elf = snapshot
             .iter()
-            .find(|e| e.extension == "exe")
-            .expect("exe tier-4 entry");
-        assert_eq!(exe.size, 0);
-        assert!(exe.extents.is_empty());
-        assert!(exe.name.starts_with("unvalidated_carved_"));
+            .find(|e| e.extension == "elf")
+            .expect("elf tier-4 entry");
+        assert_eq!(elf.size, 0);
+        assert!(elf.extents.is_empty());
+        assert!(elf.name.starts_with("unvalidated_carved_"));
     }
 
     #[test]
