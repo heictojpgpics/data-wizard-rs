@@ -26,6 +26,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod checkpoint;
+pub mod classify;
 pub mod error;
 pub mod extents;
 pub mod fat_timestamp;

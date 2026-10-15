@@ -84,13 +84,30 @@ pub struct RecoverFilesRequest {
     pub scan_id: String,
     pub entry_ids: Vec<String>,
     pub destination_dir: String,
+    /// "error" (refuse collisions), "keep_both" (write "name (n).ext"),
+    /// "overwrite" (replace). Default when absent: "keep_both" — the
+    /// never-destroys-user-data choice for interactive recovery.
+    pub collision_policy: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct RecoverFilesResponse {
     pub recovered: u32,
     pub failed: u32,
+    pub bytes_written: u64,
+    pub results: Vec<super::types::FileRecoveryOutcome>,
+    pub warnings: Vec<String>,
     pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ScanStatsRequest {
+    pub scan_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ScanStatsResponse {
+    pub stats: super::types::ScanStatsDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

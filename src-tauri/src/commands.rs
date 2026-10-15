@@ -11,12 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use tauri::State;
+use tauri::{Emitter, State};
 use tracing::{info, warn};
 
 use dw_disk::{DiskSource, FileBackedSource, PartitionView};
 
 use dw_ipc::commands::*;
+use dw_ipc::types as dto;
 
 use crate::state::{AppState, ScanRecord};
 
@@ -29,6 +30,19 @@ fn checkpoint_dir(state: &State<'_, Arc<RwLock<AppState>>>) -> PathBuf {
         .app_data_dir()
         .unwrap_or_else(|_| std::env::temp_dir())
         .join("checkpoints");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Scratch dir for results-store spill files.
+fn spills_dir(state: &State<'_, Arc<RwLock<AppState>>>) -> PathBuf {
+    use tauri::Manager;
+    let app = state.read().app.clone();
+    let dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("spills");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -57,6 +71,22 @@ async fn probe_partition_fs(view: &PartitionView) -> Option<String> {
         }
     }
     None
+}
+
+/// Open a scan/recovery source: raw Windows devices go through
+/// `WindowsRawSource`, everything else through `FileBackedSource`.
+fn open_source(path: &Path) -> Result<Arc<dyn DiskSource>, String> {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if s.starts_with("\\\\.\\") {
+            let src = dw_disk::windows_raw::WindowsRawSource::open(path)
+                .map_err(|e| format!("open device: {e}"))?;
+            return Ok(Arc::new(src));
+        }
+    }
+    let src = FileBackedSource::open(path).map_err(|e| format!("open source: {e}"))?;
+    Ok(Arc::new(src))
 }
 
 #[tauri::command]
@@ -92,9 +122,7 @@ pub async fn start_scan(
 
     // Open the source.
     let source_path = parse_source_uri(&req.source_uri)?;
-    let file_source = Arc::new(
-        FileBackedSource::open(&source_path).map_err(|e| format!("open source: {e}"))?,
-    );
+    let file_source = open_source(&source_path)?;
 
     // Optionally narrow to one partition inside the source.
     let source: Arc<dyn DiskSource> = match req.partition {
@@ -109,25 +137,29 @@ pub async fn start_scan(
                 dw_disk::DiscoveredTable::None => {
                     return Err(format!(
                         "source has no partition table; cannot select partition {index}"
-                    ))
+                    ));
                 }
             };
-            let entry = entries
-                .iter()
-                .find(|e| e.index == index)
-                .ok_or_else(|| {
-                    format!(
-                        "partition {index} not found (source has {} partitions)",
-                        entries.len()
-                    )
-                })?;
-            let view = PartitionView::new(file_source.as_read_at(), entry.offset_bytes, entry.size_bytes)
-                .map_err(|e| format!("partition view: {e}"))?;
+            let entry = entries.iter().find(|e| e.index == index).ok_or_else(|| {
+                format!(
+                    "partition {index} not found (source has {} partitions)",
+                    entries.len()
+                )
+            })?;
+            let view = PartitionView::new(
+                file_source.as_read_at(),
+                entry.offset_bytes,
+                entry.size_bytes,
+            )
+            .map_err(|e| format!("partition view: {e}"))?;
             Arc::new(view)
         }
     };
 
-    let handle = dw_core::ScanHandle::new(cfg);
+    // Spill overflow results to per-scan scratch files instead of
+    // growing memory without bound on deep scans.
+    let spill_dir = spills_dir(&state);
+    let handle = dw_core::ScanHandle::with_spill_dir(cfg, Some(spill_dir));
     let scan_id = handle.id();
     let record = ScanRecord::new(handle.clone(), req.source_uri.clone());
 
@@ -147,7 +179,7 @@ pub async fn start_scan(
     }
 
     let state_clone = Arc::clone(state.inner());
-    let mode = cfg.mode;
+    let mode = mode;
     tokio::spawn(async move {
         info!(scan_id = %scan_id, "Scan task started");
         let result = scan.run().await;
@@ -156,21 +188,33 @@ pub async fn start_scan(
                 // No plugin recognized the source: run the raw-carving
                 // fallback here in the app layer (dw-core stays free of
                 // dw-carver; layering: carver depends on core).
+                //
+                // Everything the fallback needs is collected under a
+                // SHORT lock; the guard is dropped before any await
+                // (holding a lock guard across an await is both a
+                // Send violation and a deadlock risk).
                 let mut carved_fallback: Option<u64> = None;
                 if outcome.plugin_id.is_none() && matches!(mode, dw_core::plugin::ScanMode::Deep) {
-                    if let Some(record) = state_clone.read().scans.get(&scan_id) {
-                        let source_path = match parse_source_uri(&record.source_uri) {
+                    let fallback = {
+                        let g = state_clone.read();
+                        g.scans.get(&scan_id).map(|record| {
+                            (
+                                record.source_uri.clone(),
+                                record.handle.results(),
+                                record.handle.cancel_flag(),
+                                g.app.clone(),
+                            )
+                        })
+                    };
+                    if let Some((source_uri, results, cancel, app)) = fallback {
+                        let source_path = match parse_source_uri(&source_uri) {
                             Ok(p) => p,
                             Err(_) => return,
                         };
-                        if let Ok(src) = FileBackedSource::open(&source_path) {
-                            let size = src.size();
+                        if let Ok(src) = open_source(&source_path) {
+                            let size = dw_disk::ReadAt::size(src.as_read_at().as_ref());
                             let db = dw_signatures::SignatureDb::from_embedded();
                             let read_at = src.as_read_at();
-                            let results = record.handle.results();
-                            let progress = record.progress_sink(
-                                &(state_clone.read().app.clone()),
-                            );
                             warn!(scan_id = %scan_id, size, "Raw-carving fallback (unknown filesystem)");
                             carved_fallback = dw_carver::header_footer::carve_region_async(
                                 read_at,
@@ -178,12 +222,21 @@ pub async fn start_scan(
                                 size,
                                 std::sync::Arc::new(db),
                                 results,
-                                progress,
+                                Arc::new(crate::progress_sink::TauriProgressSink::new(
+                                    app, scan_id,
+                                )),
                                 scan_id,
                                 1 << 20,
                             )
                             .await
                             .ok();
+                            // Cancellation from the raw-carve path: honor it.
+                            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                                let g = state_clone.read();
+                                if let Some(record) = g.scans.get(&scan_id) {
+                                    record.handle.set_state(dw_core::ScanState::Cancelled);
+                                }
+                            }
                         }
                     }
                 }
@@ -220,6 +273,9 @@ pub async fn cancel_scan(
     info!(scan_id = %id, "cancel_scan");
     let mut g = state.write();
     if let Some(record) = g.scans.get_mut(&id) {
+        // Both channels: the lifecycle state (phase transitions check it)
+        // and the cooperative flag (carver worker pools poll it).
+        record.handle.request_cancel();
         record.handle.set_state(dw_core::ScanState::Cancelled);
         Ok(CancelScanResponse { cancelled: true })
     } else {
@@ -235,19 +291,22 @@ pub async fn get_scan_progress(
 ) -> Result<GetScanProgressResponse, String> {
     let id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
     let g = state.read();
-    let record = g.scans.get(&id).ok_or_else(|| "scan not found".to_string())?;
+    let record = g
+        .scans
+        .get(&id)
+        .ok_or_else(|| "scan not found".to_string())?;
     let state_dto = match record.handle.state() {
-        dw_core::ScanState::Created | dw_core::ScanState::Probing => dw_ipc::ScanPhase::Probing,
-        dw_core::ScanState::QuickScan => dw_ipc::ScanPhase::QuickScan,
-        dw_core::ScanState::DeepScan => dw_ipc::ScanPhase::DeepScan,
-        dw_core::ScanState::Finalizing => dw_ipc::ScanPhase::Finalizing,
-        dw_core::ScanState::Done => dw_ipc::ScanPhase::Done,
-        dw_core::ScanState::Cancelled => dw_ipc::ScanPhase::Cancelled,
-        dw_core::ScanState::Failed => dw_ipc::ScanPhase::Failed,
+        dw_core::ScanState::Created | dw_core::ScanState::Probing => dto::ScanPhase::Probing,
+        dw_core::ScanState::QuickScan => dto::ScanPhase::QuickScan,
+        dw_core::ScanState::DeepScan => dto::ScanPhase::DeepScan,
+        dw_core::ScanState::Finalizing => dto::ScanPhase::Finalizing,
+        dw_core::ScanState::Done => dto::ScanPhase::Done,
+        dw_core::ScanState::Cancelled => dto::ScanPhase::Cancelled,
+        dw_core::ScanState::Failed => dto::ScanPhase::Failed,
     };
     let total = record.handle.results().len() as u64;
     Ok(GetScanProgressResponse {
-        progress: dw_ipc::ScanProgress {
+        progress: dto::ScanProgress {
             scan_id: id.to_string(),
             phase: state_dto,
             current: total,
@@ -257,6 +316,21 @@ pub async fn get_scan_progress(
     })
 }
 
+/// Map a core RecoveryStatus to the wire DTO. Exhaustive by design: a new
+/// core variant must surface here consciously (the previous non-exhaustive
+/// match failed to compile on Windows only, after the lib workspace went
+/// green on Linux — this helper keeps the mapping in ONE place).
+fn status_to_dto(status: dw_core::RecoveryStatus) -> dto::RecoveryStatusDto {
+    match status {
+        dw_core::RecoveryStatus::Intact => dto::RecoveryStatusDto::Intact,
+        dw_core::RecoveryStatus::PartiallyRecovered => dto::RecoveryStatusDto::PartiallyRecovered,
+        dw_core::RecoveryStatus::Overwritten => dto::RecoveryStatusDto::Overwritten,
+        dw_core::RecoveryStatus::Carved => dto::RecoveryStatusDto::Carved,
+        dw_core::RecoveryStatus::CarvedValidated => dto::RecoveryStatusDto::CarvedValidated,
+        dw_core::RecoveryStatus::PendingValidation => dto::RecoveryStatusDto::PendingValidation,
+    }
+}
+
 #[tauri::command]
 pub async fn list_results(
     state: State<'_, Arc<RwLock<AppState>>>,
@@ -264,30 +338,24 @@ pub async fn list_results(
 ) -> Result<ListResultsResponse, String> {
     let id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
     let g = state.read();
-    let record = g.scans.get(&id).ok_or_else(|| "scan not found".to_string())?;
-    let snapshot = record.handle.results().snapshot();
-    let total = snapshot.len() as u64;
-    let items: Vec<dw_ipc::RecoveredFile> = snapshot
+    let record = g
+        .scans
+        .get(&id)
+        .ok_or_else(|| "scan not found".to_string())?;
+    let store = record.handle.results();
+    let total = store.len() as u64;
+    let spilled = store.spilled_count() as u64;
+    // Paged read: clones only the requested window, not the whole store.
+    let items: Vec<dto::RecoveredFile> = store
+        .page(req.offset as usize, req.limit.min(1000) as usize)
         .into_iter()
-        .skip(req.offset as usize)
-        .take(req.limit as usize)
-        .map(|e| dw_ipc::RecoveredFile {
+        .map(|e| dto::RecoveredFile {
             id: e.id.0.to_string(),
             name: e.name,
             parent_path: e.parent_path,
             size_bytes: e.size,
             mtime: e.mtime.map(|t| t.to_string()),
-            status: match e.status {
-                dw_core::RecoveryStatus::Intact => dw_ipc::RecoveryStatusDto::Intact,
-                dw_core::RecoveryStatus::PartiallyRecovered => {
-                    dw_ipc::RecoveryStatusDto::PartiallyRecovered
-                }
-                dw_core::RecoveryStatus::Overwritten => dw_ipc::RecoveryStatusDto::Overwritten,
-                dw_core::RecoveryStatus::Carved => dw_ipc::RecoveryStatusDto::Carved,
-                dw_core::RecoveryStatus::PendingValidation => {
-                    dw_ipc::RecoveryStatusDto::PendingValidation
-                }
-            },
+            status: status_to_dto(e.status),
             extension: e.extension,
             mime: e.mime,
             confidence: e.confidence,
@@ -296,8 +364,62 @@ pub async fn list_results(
         .collect();
     Ok(ListResultsResponse {
         total,
-        spilled: record.handle.results().spilled_count() as u64,
+        spilled,
         items,
+    })
+}
+
+#[tauri::command]
+pub async fn scan_stats(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    req: ScanStatsRequest,
+) -> Result<ScanStatsResponse, String> {
+    let id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
+    let g = state.read();
+    let record = g
+        .scans
+        .get(&id)
+        .ok_or_else(|| "scan not found".to_string())?;
+    let stats = dw_core::classify::compute_stats(record.handle.results().as_ref());
+
+    Ok(ScanStatsResponse {
+        stats: dto::ScanStatsDto {
+            scan_id: id.to_string(),
+            total_files: stats.total_files,
+            total_bytes: stats.total_bytes,
+            by_status: stats
+                .by_status
+                .into_iter()
+                .map(|(status, files, bytes)| dto::StatusCountDto {
+                    status,
+                    files,
+                    bytes,
+                })
+                .collect(),
+            by_category: stats
+                .by_category
+                .into_iter()
+                .map(|(cat, files, bytes)| dto::CategoryCountDto {
+                    category: serde_json::to_string(&cat)
+                        .unwrap_or_else(|_| "\"other\"".into())
+                        .trim_matches('"')
+                        .to_string(),
+                    label: cat.label().to_string(),
+                    files,
+                    bytes,
+                })
+                .collect(),
+            by_month: stats
+                .by_month
+                .into_iter()
+                .map(|(month, files, bytes)| dto::AgeBucketDto {
+                    month,
+                    files,
+                    bytes,
+                })
+                .collect(),
+            no_timestamp_files: stats.no_timestamp_files,
+        },
     })
 }
 
@@ -309,73 +431,144 @@ pub async fn recover_files(
     let scan_id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
     info!(scan_id = %scan_id, count = req.entry_ids.len(), dest = %req.destination_dir, "recover_files");
 
-    // Get the scan record (source URI + results).
-    let (source_uri, results) = {
-        let g = state.read();
-        let record = g.scans.get(&scan_id).ok_or_else(|| "scan not found".to_string())?;
-        (record.source_uri.clone(), record.handle.results())
+    let policy = match req.collision_policy.as_str() {
+        "error" => dw_core::CollisionPolicy::Error,
+        "keep_both" | "" => dw_core::CollisionPolicy::KeepBoth,
+        "overwrite" => dw_core::CollisionPolicy::Overwrite,
+        other => {
+            return Err(format!(
+                "unknown collision policy '{other}' (error|keep_both|overwrite)"
+            ));
+        }
     };
 
-    // Re-open the source disk.
+    // Get the scan record (source URI + results).
+    let (source_uri, results, app) = {
+        let g = state.read();
+        let record = g
+            .scans
+            .get(&scan_id)
+            .ok_or_else(|| "scan not found".to_string())?;
+        (
+            record.source_uri.clone(),
+            record.handle.results(),
+            g.app.clone(),
+        )
+    };
+
+    // Resolve every entry BEFORE any I/O: failures to resolve count as
+    // failed outcomes, and the batch size must be known for the
+    // free-space preflight.
+    let mut entries: Vec<(String, dw_core::RecoveredEntry)> =
+        Vec::with_capacity(req.entry_ids.len());
+    for id_str in &req.entry_ids {
+        match uuid::Uuid::parse_str(id_str) {
+            Ok(u) => match results.get(dw_core::RecoveredEntryId(u)) {
+                Some(e) => entries.push((id_str.clone(), e)),
+                None => {
+                    warn!(entry = %id_str, "recover: entry not found");
+                }
+            },
+            Err(e) => warn!(entry = %id_str, error = %e, "recover: invalid entry id"),
+        }
+    }
+    let unresolved = req.entry_ids.len().saturating_sub(entries.len());
+
+    let total_bytes: u64 = entries.iter().map(|(_, e)| e.size).sum();
+    let dest_dir = PathBuf::from(&req.destination_dir);
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create destination: {e}"))?;
+
     let source_path = parse_source_uri(&source_uri)?;
-    let source = FileBackedSource::open(&source_path).map_err(|e| format!("reopen source: {e}"))?;
+    dw_core::recovery::preflight_destination(&dest_dir, total_bytes, Some(&source_path))
+        .map_err(|e| e.to_string())?;
+
+    // Re-open the source disk.
+    let source = open_source(&source_path)?;
     let read_at = source.as_read_at();
 
-    // Create the destination directory if it doesn't exist.
-    let dest_dir = PathBuf::from(&req.destination_dir);
-    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create_dir_all: {e}"))?;
-
-    let mut recovered: u32 = 0;
-    let mut failed: u32 = 0;
+    let mut outcomes: Vec<dto::FileRecoveryOutcome> = Vec::with_capacity(entries.len());
+    let mut warnings: Vec<String> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
+    let mut recovered: u32 = 0;
+    let mut failed: u32 = unresolved as u32;
+    let mut bytes_written: u64 = 0;
+    let total = req.entry_ids.len() as u32;
 
-    for entry_id_str in &req.entry_ids {
-        let entry_uuid = match uuid::Uuid::parse_str(entry_id_str) {
-            Ok(u) => u,
-            Err(e) => {
-                failed += 1;
-                errors.push(format!("invalid entry ID '{entry_id_str}': {e}"));
-                continue;
-            }
-        };
-
-        let entry = match results.get(dw_core::RecoveredEntryId(entry_uuid)) {
-            Some(e) => e,
-            None => {
-                failed += 1;
-                errors.push(format!("entry not found: {entry_id_str}"));
-                continue;
-            }
-        };
-
-        // Build the destination file path.
-        // Sanitize the name: no path separators, no parent dir references.
+    for (idx, (entry_id_str, entry)) in entries.iter().enumerate() {
+        // Sanitize the name: no path separators, no parent references.
         let safe_name = sanitize_filename(&entry.name);
         let dest_path = dest_dir.join(&safe_name);
 
-        // Read the file data from the source.
-        match dw_core::recovery::recover_entry_to_path(&entry, read_at.as_ref(), &dest_path) {
-            Ok(bytes_written) => {
-                info!(
-                    entry = %entry_id_str,
-                    name = %entry.name,
-                    bytes_written,
-                    "Recovered file"
-                );
+        let outcome = match dw_core::recovery::recover_entry(
+            entry,
+            read_at.as_ref(),
+            &dest_path,
+            policy,
+        ) {
+            Ok(out) => {
                 recovered += 1;
+                bytes_written += out.bytes_written;
+                if out.partial {
+                    warnings.push(format!(
+                        "'{}' recovered partially: {} of {} bytes (extents cover less than the declared size)",
+                        entry.name, out.bytes_written, entry.size
+                    ));
+                }
+                dto::FileRecoveryOutcome {
+                    entry_id: entry_id_str.clone(),
+                    name: entry.name.clone(),
+                    ok: true,
+                    path: Some(out.path.to_string_lossy().into_owned()),
+                    bytes_written: out.bytes_written,
+                    partial: out.partial,
+                    error: None,
+                }
             }
             Err(e) => {
                 failed += 1;
-                errors.push(format!("recover '{}': {e}", entry.name));
+                let msg = format!("recover '{}': {e}", entry.name);
+                errors.push(msg.clone());
+                dto::FileRecoveryOutcome {
+                    entry_id: entry_id_str.clone(),
+                    name: entry.name.clone(),
+                    ok: false,
+                    path: None,
+                    bytes_written: 0,
+                    partial: false,
+                    error: Some(msg),
+                }
             }
-        }
+        };
+
+        // Live progress to the UI (best-effort: an emit failure must
+        // not abort the batch).
+        let _ = app.emit(
+            "recovery:progress",
+            dto::RecoveryProgress {
+                scan_id: req.scan_id.clone(),
+                done: (idx + 1) as u32,
+                total,
+                current_file: entry.name.clone(),
+                bytes_written,
+            },
+        );
+        outcomes.push(outcome);
     }
 
-    info!(recovered, failed, "Recovery complete");
+    if unresolved > 0 {
+        errors.push(format!(
+            "{unresolved} selected entries no longer exist in the results (removed by dedup?)"
+        ));
+    }
+
+    info!(recovered, failed, bytes_written, "Recovery complete");
 
     Ok(RecoverFilesResponse {
         recovered,
         failed,
+        bytes_written,
+        results: outcomes,
+        warnings,
         errors,
     })
 }
@@ -423,22 +616,31 @@ pub async fn save_scan(
     info!(scan_id = %id, "save_scan");
 
     let g = state.read();
-    let record = g.scans.get(&id).ok_or_else(|| "scan not found".to_string())?;
+    let record = g
+        .scans
+        .get(&id)
+        .ok_or_else(|| "scan not found".to_string())?;
     let source_uri = record.source_uri.clone();
     drop(g);
 
     // Re-open the source for fingerprinting (read-only).
     let path = parse_source_uri(&source_uri)?;
-    let source = FileBackedSource::open(&path).map_err(|e| format!("open source: {e}"))?;
+    let source = open_source(&path)?;
 
     let g = state.read();
-    let record = g.scans.get(&id).ok_or_else(|| "scan not found".to_string())?;
+    let record = g
+        .scans
+        .get(&id)
+        .ok_or_else(|| "scan not found".to_string())?;
     let store = dw_core::CheckpointStore::new(checkpoint_dir(&state));
     let entries = record.handle.results().len() as u64;
     store
         .save(&record.handle, &source_uri, source.as_read_at().as_ref())
         .map_err(|e| e.to_string())?;
-    Ok(SaveScanResponse { saved: true, entries })
+    Ok(SaveScanResponse {
+        saved: true,
+        entries,
+    })
 }
 
 #[tauri::command]
@@ -474,9 +676,7 @@ pub async fn resume_scan(
     let store = dw_core::CheckpointStore::new(checkpoint_dir(&state));
     let cp = store.load(id).map_err(|e| e.to_string())?;
     let path = parse_source_uri(&cp.source_uri)?;
-    let source = Arc::new(
-        FileBackedSource::open(&path).map_err(|e| format!("open source: {e}"))?,
-    ) as Arc<dyn DiskSource>;
+    let source = open_source(&path)?;
     dw_core::verify_source_matches(&cp, source.as_read_at().as_ref())
         .map_err(|e| format!("refusing to resume: {e}"))?;
 
@@ -489,10 +689,11 @@ pub async fn resume_scan(
     };
     config.include_carving = req.deep;
 
-    let handle = dw_core::checkpoint::restore_handle(dw_core::ScanCheckpoint {
+    let handle_arc = dw_core::checkpoint::restore_handle(dw_core::ScanCheckpoint {
         config: config.clone(),
         ..cp
     });
+    let handle = (*handle_arc).clone();
     let scan_id = handle.id();
     // Resume always re-runs the plugin pass over the restored entries;
     // identical findings replace their older twins at the end.
@@ -565,7 +766,7 @@ pub async fn list_partitions(
 ) -> Result<ListPartitionsResponse, String> {
     info!(source = %req.source_uri, "list_partitions called");
     let path = parse_source_uri(&req.source_uri)?;
-    let source = FileBackedSource::open(&path).map_err(|e| format!("open source: {e}"))?;
+    let source = open_source(&path)?;
     let read_at = source.as_read_at();
 
     let table = dw_disk::discover_partitions(read_at.as_ref())
@@ -585,12 +786,11 @@ pub async fn list_partitions(
     let mut partitions = Vec::with_capacity(entries.len());
     for e in &entries {
         // Probe the filesystem by opening a view of this partition.
-        let fs_kind = match PartitionView::new(source.as_read_at(), e.offset_bytes, e.size_bytes)
-        {
+        let fs_kind = match PartitionView::new(source.as_read_at(), e.offset_bytes, e.size_bytes) {
             Ok(view) => probe_partition_fs(&view).await,
             Err(_) => None,
         };
-        partitions.push(dw_ipc::types::PartitionInfo {
+        partitions.push(dto::PartitionInfo {
             index: e.index,
             offset_bytes: e.offset_bytes,
             size_bytes: e.size_bytes,
@@ -610,9 +810,9 @@ pub async fn list_partitions(
 
 /// Enumerate available disks.
 ///
-/// On Windows, this uses `GetLogicalDriveStringsW` to enumerate drive letters.
+/// On Windows: physical drives plus volume letters.
 /// On other platforms, returns an empty list (the UI supports file-backed images).
-fn enumerate_disks() -> Vec<dw_ipc::types::DiskInfo> {
+fn enumerate_disks() -> Vec<dto::DiskInfo> {
     #[cfg(windows)]
     {
         enumerate_disks_windows()
@@ -624,7 +824,7 @@ fn enumerate_disks() -> Vec<dw_ipc::types::DiskInfo> {
 }
 
 #[cfg(windows)]
-fn enumerate_disks_windows() -> Vec<dw_ipc::types::DiskInfo> {
+fn enumerate_disks_windows() -> Vec<dto::DiskInfo> {
     use dw_disk::windows_raw::WindowsRawSource;
 
     let mut disks = Vec::new();
@@ -637,7 +837,7 @@ fn enumerate_disks_windows() -> Vec<dw_ipc::types::DiskInfo> {
             continue;
         };
         let read_at = source.as_read_at();
-        let size = source.size();
+        let size = dw_disk::ReadAt::size(read_at.as_ref());
         if size == 0 {
             continue;
         }
@@ -652,9 +852,9 @@ fn enumerate_disks_windows() -> Vec<dw_ipc::types::DiskInfo> {
             _ => Vec::new(),
         };
 
-        let partitions: Vec<dw_ipc::types::PartitionInfo> = entries
+        let partitions: Vec<dto::PartitionInfo> = entries
             .iter()
-            .map(|e| dw_ipc::types::PartitionInfo {
+            .map(|e| dto::PartitionInfo {
                 index: e.index,
                 offset_bytes: e.offset_bytes,
                 size_bytes: e.size_bytes,
@@ -665,13 +865,13 @@ fn enumerate_disks_windows() -> Vec<dw_ipc::types::DiskInfo> {
             })
             .collect();
 
-        disks.push(dw_ipc::types::DiskInfo {
+        disks.push(dto::DiskInfo {
             id: path,
             display_name: format!("Physical Drive {n}"),
             size_bytes: size,
-            is_removable: false, // TODO: IOCTL_STORAGE_GET_HOT_PLUG_INFO
+            is_removable: false, // TODO: IOCTL_STORAGE_QUERY_PROPERTY BusType
             is_system: partitions.iter().any(|p| p.is_system),
-            bus_type: dw_ipc::types::BusType::Sata, // TODO: IOCTL_STORAGE_QUERY_PROPERTY
+            bus_type: dto::BusType::Sata, // TODO: IOCTL_STORAGE_QUERY_PROPERTY
             partitions,
         });
     }
@@ -692,20 +892,54 @@ fn enumerate_disks_windows() -> Vec<dw_ipc::types::DiskInfo> {
         let letter = &drive_str[..2]; // e.g. "C:"
         let display_name = format!("Local Disk ({letter})");
         let volume_path = format!("\\\\.\\{letter}");
-        let size = match WindowsRawSource::open(std::path::Path::new(&volume_path)) {
-            Ok(src) => src.size(),
-            Err(_) => 0,
+        let (size, removable) = match WindowsRawSource::open(std::path::Path::new(&volume_path)) {
+            Ok(src) => (
+                dw_disk::ReadAt::size(src.as_read_at().as_ref()),
+                drive_kind(&format!("{letter}\\")),
+            ),
+            Err(_) => (0, false),
         };
-        disks.push(dw_ipc::types::DiskInfo {
+        disks.push(dto::DiskInfo {
             id: volume_path,
             display_name,
             size_bytes: size,
-            is_removable: false, // TODO: GetDriveTypeW
-            is_system: letter.eq_ignore_ascii_case("C:"),
-            bus_type: dw_ipc::types::BusType::Sata,
+            is_removable: removable,
+            is_system: is_system_drive(letter),
+            bus_type: dto::BusType::Sata, // TODO: IOCTL_STORAGE_QUERY_PROPERTY
             partitions: Vec::new(),
         });
     }
 
     disks
+}
+
+/// DRIVE_REMOVABLE / DRIVE_CDROM etc. via GetDriveTypeW (volume root
+/// form "C:\\").
+#[cfg(windows)]
+fn drive_kind(root: &str) -> bool {
+    const DRIVE_REMOVABLE: u32 = 2;
+    use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+    use windows::core::PCWSTR;
+    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+    let ty = unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) };
+    ty == DRIVE_REMOVABLE
+}
+
+/// The system drive is where the Windows directory lives, not a hardcoded
+/// "C:" (a long-standing wart of naive enumerators).
+#[cfg(windows)]
+fn is_system_drive(letter: &str) -> bool {
+    use windows::Win32::System::SystemInformation::GetWindowsDirectoryW;
+    let mut buf = [0u16; 260];
+    let len = unsafe { GetWindowsDirectoryW(Some(&mut buf)) };
+    if len == 0 || len as usize >= buf.len() {
+        // Fall back to the SYSTEMDRIVE environment variable.
+        return std::env::var("SYSTEMDRIVE")
+            .map(|d| d.eq_ignore_ascii_case(letter))
+            .unwrap_or(false);
+    }
+    let windir = String::from_utf16_lossy(&buf[..len as usize]);
+    windir
+        .get(..2)
+        .is_some_and(|root| root.eq_ignore_ascii_case(letter))
 }
