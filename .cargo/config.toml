@@ -1,0 +1,6 @@
+# Windows hardening: Control Flow Guard on every MSVC build (the carver
+# walks untrusted bytes; indirect-call instrumentation is cheap
+# insurance). Picked up by the lib workspace AND src-tauri (it sits
+# inside this tree). Verified by the winchecksec CI job.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "control-flow-guard=yes"]
