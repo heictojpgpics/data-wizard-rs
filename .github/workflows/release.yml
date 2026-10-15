@@ -126,7 +126,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "makeappx failed: $LASTEXITCODE" }
 
           $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $publisher `
-            -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Disposable `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
             -NotAfter (Get-Date).AddYears(2)
           Export-Certificate -Cert $cert -FilePath "$out\DataWizard-Test.cer" | Out-Null
           & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint "$out\DataWizard.msix"
