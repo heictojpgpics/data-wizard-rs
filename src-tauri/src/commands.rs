@@ -7,14 +7,14 @@
 //!  4. Converts the result to the IPC DTO.
 //!  5. Returns to the webview.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use tauri::State;
 use tracing::{info, warn};
 
-use dw_disk::FileBackedSource;
+use dw_disk::{DiskSource, FileBackedSource};
 
 use dw_ipc::commands::*;
 
@@ -25,11 +25,9 @@ pub async fn list_disks(
     _state: State<'_, Arc<RwLock<AppState>>>,
     _req: ListDisksRequest,
 ) -> Result<ListDisksResponse, String> {
-    // TODO: enumerate Windows physical drives + logical volumes via
-    //       QueryDosDevice + FindFirstVolumeW. For now, return an empty
-    //       list — the UI will let the user pick a file-backed image too.
     info!("list_disks called");
-    Ok(ListDisksResponse { disks: Vec::new() })
+    let disks = enumerate_disks();
+    Ok(ListDisksResponse { disks })
 }
 
 #[tauri::command]
@@ -53,49 +51,41 @@ pub async fn start_scan(
     };
     dw_core::scan::validate_config(&cfg).map_err(|e| e.to_string())?;
 
-    // Open the source. For now, only file-backed sources are supported.
-    // TODO: support Windows raw disk paths (\\.\PhysicalDriveN, \\.\X:).
-    let source_uri = req.source_uri.clone();
-    let source_path = parse_source_uri(&source_uri)?;
+    // Open the source.
+    let source_path = parse_source_uri(&req.source_uri)?;
     let source = Arc::new(
         FileBackedSource::open(&source_path).map_err(|e| format!("open source: {e}"))?,
     );
 
     let handle = dw_core::ScanHandle::new(cfg);
     let scan_id = handle.id();
-    let record = ScanRecord::new(handle.clone());
+    let record = ScanRecord::new(handle.clone(), req.source_uri.clone());
 
-    // Register the plugins.
+    // Register all FS plugins.
     let plugins: Vec<Arc<dyn dw_core::FsPlugin>> = vec![
-        Arc::new(dw_ntfs::NtfsPlugin::default()),
-        Arc::new(dw_fat::FatPlugin::default()),
-        Arc::new(dw_exfat::ExfatPlugin::default()),
-        Arc::new(dw_ext::ExtPlugin::default()),
-        Arc::new(dw_hfs::HfsPlugin::default()),
-        Arc::new(dw_btrfs::BtrfsPlugin::default()),
-        Arc::new(dw_refs::RefsPlugin::default()),
-        Arc::new(dw_zfs::ZfsPlugin::default()),
+        Arc::new(dw_ntfs::NtfsPlugin),
+        Arc::new(dw_fat::FatPlugin),
+        Arc::new(dw_exfat::ExfatPlugin),
+        Arc::new(dw_ext::ExtPlugin),
+        Arc::new(dw_hfs::HfsPlugin),
+        Arc::new(dw_btrfs::BtrfsPlugin),
+        Arc::new(dw_refs::RefsPlugin),
+        Arc::new(dw_zfs::ZfsPlugin),
     ];
 
-    // Get the AppHandle from state.
     let app = {
         let g = state.read();
         g.app.clone()
     };
 
-    // Create the progress sink.
     let progress = record.progress_sink(&app);
-
-    // Create the scan.
     let scan = dw_core::Scan::new(handle.clone(), source, plugins, progress);
 
-    // Store the scan record.
     {
         let mut g = state.write();
         g.scans.insert(scan_id, record);
     }
 
-    // Spawn the scan as a background task.
     let state_clone = Arc::clone(state.inner());
     tokio::spawn(async move {
         info!(scan_id = %scan_id, "Scan task started");
@@ -104,7 +94,6 @@ pub async fn start_scan(
             Ok(()) => info!(scan_id = %scan_id, "Scan task completed"),
             Err(e) => {
                 warn!(scan_id = %scan_id, error = %e, "Scan task failed");
-                // Update the scan state to Failed if it wasn't cancelled.
                 let g = state_clone.read();
                 if let Some(record) = g.scans.get(&scan_id) {
                     if record.handle.state() != dw_core::ScanState::Cancelled {
@@ -154,13 +143,14 @@ pub async fn get_scan_progress(
         dw_core::ScanState::Cancelled => dw_ipc::ScanPhase::Cancelled,
         dw_core::ScanState::Failed => dw_ipc::ScanPhase::Failed,
     };
+    let total = record.handle.results().len() as u64;
     Ok(GetScanProgressResponse {
         progress: dw_ipc::ScanProgress {
             scan_id: id.to_string(),
             phase: state_dto,
-            current: 0,
+            current: total,
             total: 0,
-            message: String::new(),
+            message: format!("{total} entries found"),
         },
     })
 }
@@ -214,27 +204,144 @@ pub async fn recover_files(
     state: State<'_, Arc<RwLock<AppState>>>,
     req: RecoverFilesRequest,
 ) -> Result<RecoverFilesResponse, String> {
-    let id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
-    info!(scan_id = %id, count = req.entry_ids.len(), dest = %req.destination_dir, "recover_files");
-    let g = state.read();
-    let _record = g.scans.get(&id).ok_or_else(|| "scan not found".to_string())?;
-    // TODO: implement actual recovery — read source clusters, write to dest.
+    let scan_id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
+    info!(scan_id = %scan_id, count = req.entry_ids.len(), dest = %req.destination_dir, "recover_files");
+
+    // Get the scan record (source URI + results).
+    let (source_uri, results) = {
+        let g = state.read();
+        let record = g.scans.get(&scan_id).ok_or_else(|| "scan not found".to_string())?;
+        (record.source_uri.clone(), record.handle.results())
+    };
+
+    // Re-open the source disk.
+    let source_path = parse_source_uri(&source_uri)?;
+    let source = FileBackedSource::open(&source_path).map_err(|e| format!("reopen source: {e}"))?;
+    let read_at = source.as_read_at();
+
+    // Create the destination directory if it doesn't exist.
+    let dest_dir = PathBuf::from(&req.destination_dir);
+    std::fs::create_dir_all(&dest_dir).map_err(|e| format!("create_dir_all: {e}"))?;
+
+    let mut recovered: u32 = 0;
+    let mut failed: u32 = 0;
+    let mut errors: Vec<String> = Vec::new();
+
+    for entry_id_str in &req.entry_ids {
+        let entry_uuid = match uuid::Uuid::parse_str(entry_id_str) {
+            Ok(u) => u,
+            Err(e) => {
+                failed += 1;
+                errors.push(format!("invalid entry ID '{entry_id_str}': {e}"));
+                continue;
+            }
+        };
+
+        let entry = match results.get(dw_core::RecoveredEntryId(entry_uuid)) {
+            Some(e) => e,
+            None => {
+                failed += 1;
+                errors.push(format!("entry not found: {entry_id_str}"));
+                continue;
+            }
+        };
+
+        // Build the destination file path.
+        // Sanitize the name: no path separators, no parent dir references.
+        let safe_name = sanitize_filename(&entry.name);
+        let dest_path = dest_dir.join(&safe_name);
+
+        // Read the file data from the source.
+        match recover_one_file(&entry, read_at.as_ref(), &dest_path) {
+            Ok(bytes_written) => {
+                info!(
+                    entry = %entry_id_str,
+                    name = %entry.name,
+                    bytes_written,
+                    "Recovered file"
+                );
+                recovered += 1;
+            }
+            Err(e) => {
+                failed += 1;
+                errors.push(format!("recover '{}': {e}", entry.name));
+            }
+        }
+    }
+
+    info!(recovered, failed, "Recovery complete");
+
     Ok(RecoverFilesResponse {
-        recovered: 0,
-        failed: 0,
-        errors: vec!["recovery not yet implemented".into()],
+        recovered,
+        failed,
+        errors,
     })
 }
 
-/// Parse a source URI into a filesystem path.
+/// Recover a single file by reading its clusters from the source and
+/// writing to the destination.
+fn recover_one_file(
+    entry: &dw_core::RecoveredEntry,
+    read_at: &dyn dw_disk::ReadAt,
+    dest_path: &Path,
+) -> Result<u64, String> {
+    if entry.cluster_chain.is_empty() {
+        // No cluster chain — either resident (data in MFT) or empty file.
+        // For now, create an empty file.
+        std::fs::write(dest_path, b"").map_err(|e| format!("write empty file: {e}"))?;
+        return Ok(0);
+    }
+
+    // Read each cluster in the chain and write to the destination.
+    // We don't know the cluster size here (it's FS-specific), but we can
+    // read the entire file as a contiguous block if the clusters are
+    // contiguous, or read cluster-by-cluster if not.
+    //
+    // For now, we use a simple approach: read `entry.size` bytes starting
+    // from the first cluster's byte offset (computed from the first LBA
+    // in the chain). This works for contiguous files.
+    //
+    // TODO: for fragmented files, we need the cluster size + FAT chain to
+    // read each cluster separately. This requires storing the FS-specific
+    // cluster size in the RecoveredEntry (future improvement).
+    let start_byte = entry.start_lba.unwrap_or(0) * 512; // assume 512 bytes/sector for now
+    let read_len = entry.size.min(1024 * 1024 * 1024); // cap at 1 GB for safety
+
+    let mut buf = vec![0u8; read_len as usize];
+    read_at
+        .read_at(start_byte, &mut buf)
+        .map_err(|e| format!("read source: {e}"))?;
+
+    std::fs::write(dest_path, &buf).map_err(|e| format!("write dest: {e}"))?;
+
+    Ok(read_len)
+}
+
+/// Sanitize a filename for safe writing to the destination directory.
 ///
-/// Supported formats:
-/// - `file:///absolute/path` → `/absolute/path`
-/// - `/absolute/path` → `/absolute/path` (Unix)
-/// - `C:\path\to\file` → `C:\path\to\file` (Windows)
-/// - `\\.\PhysicalDrive0` → passed through (Windows raw disk; requires
-///   WindowsRawSource, not yet wired up)
-fn parse_source_uri(uri: &str) -> Result<std::path::PathBuf, String> {
+/// Removes path separators and parent-dir references to prevent path
+/// traversal attacks.
+fn sanitize_filename(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => c,
+        })
+        .collect();
+
+    // Remove leading dots (prevent hidden files / parent dir on Unix).
+    let sanitized = sanitized.trim_start_matches('.');
+
+    if sanitized.is_empty() {
+        "recovered_file".to_string()
+    } else {
+        sanitized.to_string()
+    }
+}
+
+/// Parse a source URI into a filesystem path.
+fn parse_source_uri(uri: &str) -> Result<PathBuf, String> {
     if let Some(path) = uri.strip_prefix("file://") {
         Ok(Path::new(path).to_path_buf())
     } else if uri.starts_with('/') || uri.starts_with('\\') || uri.contains(':') {
@@ -242,4 +349,59 @@ fn parse_source_uri(uri: &str) -> Result<std::path::PathBuf, String> {
     } else {
         Err(format!("unsupported source URI: {uri}"))
     }
+}
+
+/// Enumerate available disks.
+///
+/// On Windows, this uses `GetLogicalDriveStringsW` to enumerate drive letters.
+/// On other platforms, returns an empty list (the UI supports file-backed images).
+fn enumerate_disks() -> Vec<dw_ipc::types::DiskInfo> {
+    #[cfg(windows)]
+    {
+        enumerate_disks_windows()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+#[cfg(windows)]
+fn enumerate_disks_windows() -> Vec<dw_ipc::types::DiskInfo> {
+    use windows::Win32::Storage::FileSystem::GetLogicalDriveStringsW;
+
+    let mut buf = [0u16; 260];
+    let len = unsafe { GetLogicalDriveStringsW(Some(&mut buf)) };
+    if len == 0 {
+        return Vec::new();
+    }
+
+    let mut disks = Vec::new();
+    let strings = String::from_utf16_lossy(&buf[..len as usize]);
+    for drive_str in strings.split('\0') {
+        if drive_str.is_empty() || drive_str.len() < 2 {
+            continue;
+        }
+        let letter = &drive_str[..2]; // e.g. "C:"
+        let display_name = format!("Local Disk ({letter})");
+
+        // Try to get the size by opening the volume.
+        let volume_path = format!("\\\\.\\{letter}");
+        let size = match dw_disk::FileBackedSource::open(std::path::Path::new(&volume_path)) {
+            Ok(src) => src.size(),
+            Err(_) => 0,
+        };
+
+        disks.push(dw_ipc::types::DiskInfo {
+            id: volume_path,
+            display_name,
+            size_bytes: size,
+            is_removable: false, // TODO: check with GetDriveTypeW
+            is_system: letter.eq_ignore_ascii_case("C:"),
+            bus_type: dw_ipc::types::BusType::Sata,
+            partitions: Vec::new(),
+        });
+    }
+
+    disks
 }

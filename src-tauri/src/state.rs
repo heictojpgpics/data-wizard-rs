@@ -27,11 +27,18 @@ impl AppState {
 
 pub struct ScanRecord {
     pub handle: ScanHandle,
+    /// The source URI (file path or device path) used to open the scan.
+    /// Stored so the recovery command can re-open the source to read
+    /// file data.
+    pub source_uri: String,
 }
 
 impl ScanRecord {
-    pub fn new(handle: ScanHandle) -> Self {
-        Self { handle }
+    pub fn new(handle: ScanHandle, source_uri: String) -> Self {
+        Self {
+            handle,
+            source_uri,
+        }
     }
 
     /// Create a `TauriProgressSink` for this scan.
