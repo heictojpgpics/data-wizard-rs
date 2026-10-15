@@ -1,4 +1,4 @@
-//! Windows raw-disk access via `CreateFileW` + `ReadFile`.
+//! Windows raw-disk access via `CreateFileW` + `SetFilePointerEx` + `ReadFile`.
 //!
 //! Only compiled on Windows. The rest of the codebase talks to disks
 //! through the [`DiskSource`](crate::DiskSource) trait, so this module is
@@ -6,10 +6,9 @@
 //!
 //! # Safety
 //!
-//! This module uses `unsafe` for Win32 FFI (CreateFileW, ReadFile,
-//! GetFileSizeEx, CloseHandle). The HANDLE is wrapped in a struct that
-//! implements `Send` + `Sync` manually (Win32 HANDLEs are thread-safe
-//! for read operations).
+//! This module uses `unsafe` for Win32 FFI. The HANDLE is wrapped in a
+//! struct that implements `Send` + `Sync` manually (Win32 HANDLEs are
+//! thread-safe for read operations).
 
 #![cfg(windows)]
 #![allow(unsafe_code)]
@@ -25,20 +24,14 @@ use parking_lot::Mutex;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileSizeEx,
-    OPEN_EXISTING, ReadFile,
+    OPEN_EXISTING, ReadFile, SetFilePointerEx,
 };
-use windows::Win32::System::IO::OVERLAPPED;
 use windows::core::PCWSTR;
 
 use crate::source::{DiskSource, ReadAt};
 use crate::{DiskError, DiskGeometry, DiskResult};
 
 /// Wrapper around a Win32 `HANDLE` that is `Send + Sync`.
-///
-/// Win32 handles are safe to share across threads for read operations
-/// (the OS synchronizes access internally). We wrap the raw `HANDLE`
-/// (which contains a `*mut c_void`) in this struct and implement `Send`
-/// + `Sync` manually.
 struct SendHandle(HANDLE);
 
 unsafe impl Send for SendHandle {}
@@ -58,8 +51,9 @@ impl WindowsRawSource {
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
+
         // SAFETY: CreateFileW is FFI; we pass a valid NUL-terminated wide
-        // string and standard flags. The returned handle is checked.
+        // string and standard flags.
         let handle = unsafe {
             CreateFileW(
                 PCWSTR(path_wide.as_ptr()),
@@ -71,9 +65,8 @@ impl WindowsRawSource {
                 None,
             )
         };
-        // The `windows` crate returns a `Result<HANDLE>` on error.
         let handle = match handle {
-            Ok(h) if h != INVALID_HANDLE_VALUE => h,
+            Ok(h) if h != INVALID_HANDLE_VALUE && !h.is_invalid() => h,
             _ => {
                 return Err(DiskError::Windows(format!(
                     "CreateFileW failed for {path:?}"
@@ -99,7 +92,7 @@ impl WindowsRawSource {
 impl Drop for WindowsRawSource {
     fn drop(&mut self) {
         let h = self.handle.lock();
-        if h.0 != INVALID_HANDLE_VALUE && !h.0.is_invalid() {
+        if !h.0.is_invalid() {
             let _ = unsafe { CloseHandle(h.0) };
         }
     }
@@ -107,8 +100,7 @@ impl Drop for WindowsRawSource {
 
 fn query_size(handle: HANDLE) -> DiskResult<u64> {
     let mut size: i64 = 0;
-    // SAFETY: GetFileSizeEx takes a valid HANDLE and a pointer to a
-    // LARGE_INTEGER (which in Rust is just an i64).
+    // SAFETY: GetFileSizeEx takes a valid HANDLE and a pointer to i64.
     let ok = unsafe { GetFileSizeEx(handle, &mut size) };
     if ok.is_err() {
         return Err(DiskError::Windows("GetFileSizeEx failed".into()));
@@ -122,15 +114,25 @@ impl ReadAt for WindowsRawSource {
         if h.0.is_invalid() {
             return Err(DiskError::Windows("invalid handle".into()));
         }
-        // Build OVERLAPPED for async-style positional read.
-        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-        overlapped.Anonymous.Offset = (offset & 0xFFFF_FFFF) as u32;
-        overlapped.Anononymous.OffsetHigh = (offset >> 32) as u32;
 
+        // Set the file pointer to the desired offset.
+        // SAFETY: SetFilePointerEx takes a valid HANDLE and a signed 64-bit
+        // offset. We pass 0 as the distance to move high pointer since we
+        // don't need it.
+        let pos = offset as i64;
+        let ok = unsafe { SetFilePointerEx(h.0, pos, None, 0) }; // FILE_BEGIN = 0
+        if ok.is_err() {
+            return Err(DiskError::Windows(format!(
+                "SetFilePointerEx to {offset} failed"
+            )));
+        }
+
+        // Read synchronously (no OVERLAPPED).
         let mut bytes_read: u32 = 0;
-        // SAFETY: ReadFile takes a valid HANDLE, a writable buffer, and
-        // an OVERLAPPED pointer. We pass all three correctly.
-        let ok = unsafe { ReadFile(h.0, Some(buf), &mut bytes_read, Some(&mut overlapped)) };
+        // SAFETY: ReadFile takes a valid HANDLE, a writable buffer, and a
+        // pointer to receive bytes read. We pass None for OVERLAPPED to
+        // do a synchronous read at the current file position.
+        let ok = unsafe { ReadFile(h.0, Some(buf), &mut bytes_read, None) };
         if ok.is_err() || bytes_read as usize != buf.len() {
             return Err(DiskError::Windows(format!(
                 "ReadFile at offset {offset} got {bytes_read} of {} bytes",
@@ -158,9 +160,6 @@ impl DiskSource for WindowsRawSource {
     }
 
     fn as_read_at(&self) -> Arc<dyn ReadAt> {
-        // Windows HANDLE cannot be cheaply duplicated. Callers that need
-        // a long-lived ReadAt should hold their own Arc<WindowsRawSource>.
-        // The cross-platform code paths use FileBackedSource for tests.
         unimplemented!("callers should hold their own Arc<WindowsRawSource>")
     }
 }
