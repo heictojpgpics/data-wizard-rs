@@ -14,11 +14,37 @@ use parking_lot::RwLock;
 use tauri::State;
 use tracing::{info, warn};
 
-use dw_disk::{DiskSource, FileBackedSource};
+use dw_disk::{DiskSource, FileBackedSource, PartitionView};
 
 use dw_ipc::commands::*;
 
 use crate::state::{AppState, ScanRecord};
+
+/// All registered filesystem plugins (shared by start_scan and
+/// list_partitions probing).
+fn all_plugins() -> Vec<Arc<dyn dw_core::FsPlugin>> {
+    vec![
+        Arc::new(dw_ntfs::NtfsPlugin),
+        Arc::new(dw_fat::FatPlugin),
+        Arc::new(dw_exfat::ExfatPlugin),
+        Arc::new(dw_ext::ExtPlugin),
+        Arc::new(dw_hfs::HfsPlugin),
+        Arc::new(dw_btrfs::BtrfsPlugin),
+        Arc::new(dw_refs::RefsPlugin),
+        Arc::new(dw_zfs::ZfsPlugin),
+    ]
+}
+
+/// Probe the filesystem of one partition; returns the fs_kind string of
+/// the first plugin that recognizes it.
+async fn probe_partition_fs(view: &PartitionView) -> Option<String> {
+    for plugin in all_plugins() {
+        if let Ok(dw_core::ProbeOutcome::Yes(probe)) = plugin.probe(view).await {
+            return Some(probe.fs_kind);
+        }
+    }
+    None
+}
 
 #[tauri::command]
 pub async fn list_disks(
@@ -53,25 +79,46 @@ pub async fn start_scan(
 
     // Open the source.
     let source_path = parse_source_uri(&req.source_uri)?;
-    let source = Arc::new(
+    let file_source = Arc::new(
         FileBackedSource::open(&source_path).map_err(|e| format!("open source: {e}"))?,
     );
+
+    // Optionally narrow to one partition inside the source.
+    let source: Arc<dyn DiskSource> = match req.partition {
+        None => file_source,
+        Some(index) => {
+            let read_at = file_source.as_read_at();
+            let table = dw_disk::discover_partitions(read_at.as_ref())
+                .map_err(|e| format!("discover partitions: {e}"))?;
+            let entries = match &table {
+                dw_disk::DiscoveredTable::Gpt { entries, .. } => entries,
+                dw_disk::DiscoveredTable::Mbr { entries } => entries,
+                dw_disk::DiscoveredTable::None => {
+                    return Err(format!(
+                        "source has no partition table; cannot select partition {index}"
+                    ))
+                }
+            };
+            let entry = entries
+                .iter()
+                .find(|e| e.index == index)
+                .ok_or_else(|| {
+                    format!(
+                        "partition {index} not found (source has {} partitions)",
+                        entries.len()
+                    )
+                })?;
+            let view = PartitionView::new(file_source.as_read_at(), entry.offset_bytes, entry.size_bytes)
+                .map_err(|e| format!("partition view: {e}"))?;
+            Arc::new(view)
+        }
+    };
 
     let handle = dw_core::ScanHandle::new(cfg);
     let scan_id = handle.id();
     let record = ScanRecord::new(handle.clone(), req.source_uri.clone());
 
-    // Register all FS plugins.
-    let plugins: Vec<Arc<dyn dw_core::FsPlugin>> = vec![
-        Arc::new(dw_ntfs::NtfsPlugin),
-        Arc::new(dw_fat::FatPlugin),
-        Arc::new(dw_exfat::ExfatPlugin),
-        Arc::new(dw_ext::ExtPlugin),
-        Arc::new(dw_hfs::HfsPlugin),
-        Arc::new(dw_btrfs::BtrfsPlugin),
-        Arc::new(dw_refs::RefsPlugin),
-        Arc::new(dw_zfs::ZfsPlugin),
-    ];
+    let plugins = all_plugins();
 
     let app = {
         let g = state.read();
@@ -312,6 +359,56 @@ fn parse_source_uri(uri: &str) -> Result<PathBuf, String> {
     }
 }
 
+#[tauri::command]
+pub async fn list_partitions(
+    _state: State<'_, Arc<RwLock<AppState>>>,
+    req: ListPartitionsRequest,
+) -> Result<ListPartitionsResponse, String> {
+    info!(source = %req.source_uri, "list_partitions called");
+    let path = parse_source_uri(&req.source_uri)?;
+    let source = FileBackedSource::open(&path).map_err(|e| format!("open source: {e}"))?;
+    let read_at = source.as_read_at();
+
+    let table = dw_disk::discover_partitions(read_at.as_ref())
+        .map_err(|e| format!("discover partitions: {e}"))?;
+    let kind = match &table {
+        dw_disk::DiscoveredTable::Gpt { .. } => "gpt",
+        dw_disk::DiscoveredTable::Mbr { .. } => "mbr",
+        dw_disk::DiscoveredTable::None => "none",
+    };
+
+    let entries = match &table {
+        dw_disk::DiscoveredTable::Gpt { entries, .. } => entries.clone(),
+        dw_disk::DiscoveredTable::Mbr { entries } => entries.clone(),
+        dw_disk::DiscoveredTable::None => Vec::new(),
+    };
+
+    let mut partitions = Vec::with_capacity(entries.len());
+    for e in &entries {
+        // Probe the filesystem by opening a view of this partition.
+        let fs_kind = match PartitionView::new(source.as_read_at(), e.offset_bytes, e.size_bytes)
+        {
+            Ok(view) => probe_partition_fs(&view).await,
+            Err(_) => None,
+        };
+        partitions.push(dw_ipc::types::PartitionInfo {
+            index: e.index,
+            offset_bytes: e.offset_bytes,
+            size_bytes: e.size_bytes,
+            fs_kind,
+            label: e.label.clone(),
+            drive_letter: None,
+            is_system: e.type_name == "EFI System Partition",
+        });
+    }
+
+    info!(kind, count = partitions.len(), "list_partitions done");
+    Ok(ListPartitionsResponse {
+        table_kind: kind.to_string(),
+        partitions,
+    })
+}
+
 /// Enumerate available disks.
 ///
 /// On Windows, this uses `GetLogicalDriveStringsW` to enumerate drive letters.
@@ -329,15 +426,65 @@ fn enumerate_disks() -> Vec<dw_ipc::types::DiskInfo> {
 
 #[cfg(windows)]
 fn enumerate_disks_windows() -> Vec<dw_ipc::types::DiskInfo> {
-    use windows::Win32::Storage::FileSystem::GetLogicalDriveStringsW;
+    use dw_disk::windows_raw::WindowsRawSource;
 
+    let mut disks = Vec::new();
+
+    // Physical drives: \\.\PhysicalDrive0..N. Opening failures (index
+    // gaps / permissions) are skipped silently.
+    for n in 0..64u32 {
+        let path = format!("\\\\.\\PhysicalDrive{n}");
+        let Ok(source) = WindowsRawSource::open(std::path::Path::new(&path)) else {
+            continue;
+        };
+        let read_at = source.as_read_at();
+        let size = source.size();
+        if size == 0 {
+            continue;
+        }
+
+        // Discover the partition layout (MBR + EBR chains / GPT with CRC
+        // validation). On corrupt tables, report the disk with no
+        // partitions rather than dropping it.
+        let table = dw_disk::discover_partitions(read_at.as_ref()).ok();
+        let entries = match &table {
+            Some(dw_disk::DiscoveredTable::Gpt { entries, .. }) => entries.clone(),
+            Some(dw_disk::DiscoveredTable::Mbr { entries }) => entries.clone(),
+            _ => Vec::new(),
+        };
+
+        let partitions: Vec<dw_ipc::types::PartitionInfo> = entries
+            .iter()
+            .map(|e| dw_ipc::types::PartitionInfo {
+                index: e.index,
+                offset_bytes: e.offset_bytes,
+                size_bytes: e.size_bytes,
+                fs_kind: None, // probed on demand via list_partitions
+                label: e.label.clone(),
+                drive_letter: None,
+                is_system: e.type_name == "EFI System Partition",
+            })
+            .collect();
+
+        disks.push(dw_ipc::types::DiskInfo {
+            id: path,
+            display_name: format!("Physical Drive {n}"),
+            size_bytes: size,
+            is_removable: false, // TODO: IOCTL_STORAGE_GET_HOT_PLUG_INFO
+            is_system: partitions.iter().any(|p| p.is_system),
+            bus_type: dw_ipc::types::BusType::Sata, // TODO: IOCTL_STORAGE_QUERY_PROPERTY
+            partitions,
+        });
+    }
+
+    // Volumes (drive letters) — retained so the UI can scan a volume
+    // directly without picking a partition.
+    use windows::Win32::Storage::FileSystem::GetLogicalDriveStringsW;
     let mut buf = [0u16; 260];
     let len = unsafe { GetLogicalDriveStringsW(Some(&mut buf)) };
     if len == 0 {
-        return Vec::new();
+        return disks;
     }
-
-    let mut disks = Vec::new();
     let strings = String::from_utf16_lossy(&buf[..len as usize]);
     for drive_str in strings.split('\0') {
         if drive_str.is_empty() || drive_str.len() < 2 {
@@ -345,19 +492,16 @@ fn enumerate_disks_windows() -> Vec<dw_ipc::types::DiskInfo> {
         }
         let letter = &drive_str[..2]; // e.g. "C:"
         let display_name = format!("Local Disk ({letter})");
-
-        // Try to get the size by opening the volume.
         let volume_path = format!("\\\\.\\{letter}");
-        let size = match dw_disk::FileBackedSource::open(std::path::Path::new(&volume_path)) {
+        let size = match WindowsRawSource::open(std::path::Path::new(&volume_path)) {
             Ok(src) => src.size(),
             Err(_) => 0,
         };
-
         disks.push(dw_ipc::types::DiskInfo {
             id: volume_path,
             display_name,
             size_bytes: size,
-            is_removable: false, // TODO: check with GetDriveTypeW
+            is_removable: false, // TODO: GetDriveTypeW
             is_system: letter.eq_ignore_ascii_case("C:"),
             bus_type: dw_ipc::types::BusType::Sata,
             partitions: Vec::new(),

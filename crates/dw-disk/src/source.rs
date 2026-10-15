@@ -172,3 +172,90 @@ impl ReadAt for FileBackedReadAt {
         self.size
     }
 }
+
+// ---------------------------------------------------------------------------
+// PartitionView: scan a single partition inside a larger source
+// ---------------------------------------------------------------------------
+
+/// A view over one partition of a larger source.
+///
+/// All reads are translated by `offset` and bounds-checked against the
+/// partition's own `size`, so filesystem parsers see exactly the
+/// partition as if it were a standalone volume. This is how
+/// `start_scan(partition)` works without copying or slicing images.
+pub struct PartitionView {
+    inner: Arc<dyn ReadAt>,
+    offset: u64,
+    size: u64,
+}
+
+impl PartitionView {
+    /// Create a view of `[offset, offset + size)` within `inner`.
+    pub fn new(inner: Arc<dyn ReadAt>, offset: u64, size: u64) -> DiskResult<Self> {
+        if offset.saturating_add(size) > inner.size() {
+            return Err(DiskError::OutOfRange {
+                offset,
+                len: size,
+                source_size: inner.size(),
+            });
+        }
+        Ok(Self {
+            inner,
+            offset,
+            size,
+        })
+    }
+}
+
+impl ReadAt for PartitionView {
+    fn read_at(&self, offset: u64, buf: &mut [u8]) -> DiskResult<()> {
+        if offset.saturating_add(buf.len() as u64) > self.size {
+            return Err(DiskError::OutOfRange {
+                offset,
+                len: buf.len() as u64,
+                source_size: self.size,
+            });
+        }
+        self.inner.read_at(self.offset + offset, buf)
+    }
+
+    fn size(&self) -> u64 {
+        self.size
+    }
+}
+
+#[async_trait]
+impl DiskSource for PartitionView {
+    async fn read_at_async(&self, offset: u64, len: u64) -> DiskResult<Bytes> {
+        if offset.saturating_add(len) > self.size {
+            return Err(DiskError::OutOfRange {
+                offset,
+                len,
+                source_size: self.size,
+            });
+        }
+        let mut buf = vec![0u8; len as usize];
+        self.inner.read_at(self.offset + offset, &mut buf)?;
+        Ok(Bytes::from(buf))
+    }
+
+    async fn geometry(&self) -> DiskResult<DiskGeometry> {
+        Ok(DiskGeometry {
+            total_bytes: self.size,
+            bytes_per_sector: 512,
+            sectors_per_track: 0,
+            heads: 0,
+            cylinders: 0,
+        })
+    }
+
+    fn as_read_at(&self) -> Arc<dyn ReadAt> {
+        // Return a shared view: PartitionView itself is ReadAt, but the
+        // trait needs a fresh Arc; clone the parts into a new view.
+        Arc::new(Self {
+            inner: Arc::clone(&self.inner),
+            offset: self.offset,
+            size: self.size,
+        })
+    }
+}

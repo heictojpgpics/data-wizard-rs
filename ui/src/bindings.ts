@@ -74,3 +74,23 @@ export interface ScanProgress {
 export interface StartScanResponse {
   scan_id: string;
 }
+
+// list_partitions / scan-with-partition types (hand-written pending
+// tauri-specta wiring; kept in sync with dw-ipc).
+
+export interface ListPartitionsRequest {
+  source_uri: string;
+}
+
+export interface ListPartitionsResponse {
+  table_kind: "gpt" | "mbr" | "none";
+  partitions: PartitionInfo[];
+}
+
+export interface StartScanArgs {
+  source_uri: string;
+  deep: boolean;
+  max_results: number;
+  file_filter: string[];
+  partition?: number | null;
+}

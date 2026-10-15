@@ -35,6 +35,7 @@ fn main() {
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::list_disks,
+            commands::list_partitions,
             commands::start_scan,
             commands::cancel_scan,
             commands::get_scan_progress,

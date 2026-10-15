@@ -108,7 +108,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 tracing-appender = "0.2"
 
 # Crypto / hashing
-blake3 = "1.8"
+blake3 = { version = "1.8", features = ["pure"] }
 sha2 = "0.10"
 crc32fast = "1.4"
 crc = "3.3"

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use crate::types::{DiskInfo, RecoveredFile, ScanProgress};
+use crate::types::{DiskInfo, PartitionInfo, RecoveredFile, ScanProgress};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ListDisksRequest {}
@@ -19,6 +19,12 @@ pub struct StartScanRequest {
     pub deep: bool,
     pub max_results: u32,
     pub file_filter: Vec<String>,
+    /// Optional partition index within the source (from list_partitions).
+    /// When set, the scan runs against that partition only (reads are
+    /// translated by the partition offset); when None, the whole source
+    /// is scanned as one volume.
+    #[serde(default)]
+    pub partition: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
@@ -59,6 +65,18 @@ pub struct ListResultsResponse {
     pub total: u64,
     pub spilled: u64,
     pub items: Vec<RecoveredFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ListPartitionsRequest {
+    pub source_uri: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct ListPartitionsResponse {
+    /// "gpt" | "mbr" | "none"
+    pub table_kind: String,
+    pub partitions: Vec<PartitionInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

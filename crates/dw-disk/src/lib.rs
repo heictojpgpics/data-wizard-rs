@@ -12,6 +12,7 @@
 
 pub mod error;
 pub mod geometry;
+pub mod partition;
 pub mod source;
 #[cfg(windows)]
 pub mod windows_raw;
@@ -20,4 +21,5 @@ pub use error::{DiskError, DiskResult};
 pub use geometry::{
     DiskGeometry, Partition, PartitionFsHint, PartitionTable, PartitionType, SectorSize,
 };
-pub use source::{DiskSource, FileBackedSource, ReadAt};
+pub use partition::{DiscoveredTable, PartitionEntry, discover_partitions};
+pub use source::{DiskSource, FileBackedSource, PartitionView, ReadAt};

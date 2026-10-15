@@ -19,6 +19,9 @@ pub enum DiskError {
     #[error("geometry error: {0}")]
     Geometry(String),
 
+    #[error("corrupt structure: {0}")]
+    Corrupt(String),
+
     #[error("unsupported source URI: {0}")]
     UnsupportedUri(String),
 
