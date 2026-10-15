@@ -127,6 +127,15 @@ struct CollectedRecord {
 ///
 /// This is the "quick scan" phase for NTFS. It does NOT do raw carving
 /// (that's the "deep scan" phase, handled by `dw-carver`).
+/// Outcome of an MFT walk.
+#[derive(Debug, Default)]
+pub struct WalkOutcome {
+    pub entries: u64,
+    /// $Bitmap (MFT record 6) $DATA extents + size, captured during the
+    /// walk so the deep phase can carve ONLY unallocated clusters.
+    pub bitmap: Option<(Vec<Extent>, u64)>,
+}
+
 pub async fn walk_mft(
     source: Arc<dyn DiskSource>,
     vbr: &Vbr,
@@ -134,7 +143,7 @@ pub async fn walk_mft(
     results: Arc<ResultsStore>,
     progress: Arc<dyn ProgressSink>,
     config: &WalkConfig,
-) -> CoreResult<u64> {
+) -> CoreResult<WalkOutcome> {
     let scan_id = Uuid::now_v7();
     let read_at = source.as_read_at();
     let mft_offset = vbr.mft_offset_bytes();
@@ -222,6 +231,7 @@ pub async fn walk_mft(
     let mut collected: Vec<CollectedRecord> = Vec::new();
     let mut records_processed: u64 = 0;
     let mut errors: u64 = 0;
+    let mut bitmap_capture: Option<(Vec<Extent>, u64)> = None;
 
     for record_number in 0..total_records_to_walk {
         let mft_byte_offset = record_number * u64::from(vbr.mft_record_size_bytes);
@@ -301,6 +311,12 @@ pub async fn walk_mft(
             },
             None => (0, Vec::new(), Vec::new(), None, false),
         };
+
+        // Capture $Bitmap (record 6) for the deep phase.
+        let is_bitmap_record = record_number == 6;
+        if is_bitmap_record {
+            bitmap_capture = Some((extents.clone(), file_size));
+        }
 
         collected.push(CollectedRecord {
             record_number,
@@ -411,7 +427,10 @@ pub async fn walk_mft(
         })
         .await;
 
-    Ok(entries_emitted)
+    Ok(WalkOutcome {
+        entries: entries_emitted,
+        bitmap: bitmap_capture,
+    })
 }
 
 /// Resolve the full path of a record by walking up the parent chain.

@@ -9,10 +9,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use dw_core::{CoreResult, FsPlugin, FsProbe, ProbeOutcome, ProgressSink, ResultsStore, ScanMode};
 use dw_disk::DiskSource;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::boot::Vbr;
-use crate::walker::{WalkConfig, walk_mft};
+use crate::walker::{WalkConfig, WalkOutcome, walk_mft};
 
 pub struct NtfsPlugin;
 
@@ -85,7 +85,7 @@ impl FsPlugin for NtfsPlugin {
         );
 
         let config = WalkConfig::default();
-        let entries = walk_mft(
+        let outcome: WalkOutcome = walk_mft(
             Arc::clone(&source),
             &vbr,
             mode,
@@ -94,27 +94,111 @@ impl FsPlugin for NtfsPlugin {
             &config,
         )
         .await?;
-
+        let entries = outcome.entries;
         info!(entries, "NTFS MFT walk complete");
 
-        // For deep scans, run the carver on the entire volume to find
-        // deleted files that are no longer in the MFT.
+        // Deep scan: carve the UNALLOCATED clusters only, guided by
+        // $Bitmap (MFT record 6). Falls back to whole-volume carving when
+        // the bitmap is unavailable (corrupt MFT / missing record 6).
         if mode == ScanMode::Deep {
             info!("Starting carving pass (deep scan)");
             let db = dw_signatures::SignatureDb::from_embedded();
             let read_at = source.as_read_at();
-            let carved = dw_carver::header_footer::carve_region(
-                read_at.as_ref(),
-                0,
-                vbr.total_bytes,
-                &db,
-                &results,
-                &progress,
-                uuid::Uuid::now_v7(),
-                1 << 20, // 1 MiB chunks
-            )
-            .map_err(|e| dw_core::CoreError::Plugin(format!("carver error: {e}")))?;
-            info!(entries, carved, "NTFS deep scan complete (MFT + carving)");
+            let scan_id = uuid::Uuid::now_v7();
+
+            let mut carved: u64 = 0;
+            let mut carved_regions = 0usize;
+            match outcome.bitmap {
+                Some((bitmap_extents, bitmap_size)) => {
+                    // Read the bitmap bytes through its extents.
+                    let mut bmp = vec![0u8; bitmap_size as usize];
+                    let mut filled = 0usize;
+                    for ext in &bitmap_extents {
+                        if filled >= bmp.len() {
+                            break;
+                        }
+                        let end = (filled + ext.length as usize).min(bmp.len());
+                        if read_at
+                            .read_at(ext.start_byte, &mut bmp[filled..end])
+                            .is_err()
+                        {
+                            filled = usize::MAX; // force fallback
+                            break;
+                        }
+                        filled = end;
+                    }
+                    if filled == usize::MAX || filled < bmp.len() {
+                        warn!("$Bitmap unreadable; falling back to whole-volume carving");
+                        carved = dw_carver::header_footer::carve_region(
+                            read_at.as_ref(),
+                            0,
+                            vbr.total_bytes,
+                            &db,
+                            &results,
+                            &progress,
+                            scan_id,
+                            1 << 20,
+                        )
+                        .unwrap_or(0);
+                    } else {
+                        // Cluster-granular free runs (bit = cluster, LSB-first).
+                        let cluster_size = u64::from(vbr.bytes_per_cluster);
+                        let total_clusters = vbr.total_bytes / cluster_size.max(1);
+                        let mut cluster: u64 = 0;
+                        while cluster < total_clusters {
+                            let bit = (bmp[(cluster / 8) as usize] >> (cluster % 8)) & 1;
+                            if bit == 0 {
+                                let start = cluster;
+                                while cluster < total_clusters
+                                    && ((bmp[(cluster / 8) as usize] >> (cluster % 8)) & 1) == 0
+                                {
+                                    cluster += 1;
+                                }
+                                let len = cluster - start;
+                                let off = start * cluster_size;
+                                let bytes = len * cluster_size;
+                                carved += dw_carver::header_footer::carve_region(
+                                    read_at.as_ref(),
+                                    off,
+                                    bytes,
+                                    &db,
+                                    &results,
+                                    &progress,
+                                    scan_id,
+                                    1 << 20,
+                                )
+                                .unwrap_or(0);
+                                carved_regions += 1;
+                            } else {
+                                cluster += 1;
+                            }
+                        }
+                        info!(
+                            carved,
+                            regions = carved_regions,
+                            "NTFS deep scan complete ($Bitmap-guided carving)"
+                        );
+                    }
+                }
+                None => {
+                    warn!("$Bitmap not captured; whole-volume carving");
+                    carved = dw_carver::header_footer::carve_region(
+                        read_at.as_ref(),
+                        0,
+                        vbr.total_bytes,
+                        &db,
+                        &results,
+                        &progress,
+                        scan_id,
+                        1 << 20,
+                    )
+                    .unwrap_or(0);
+                    info!(
+                        entries,
+                        carved, "NTFS deep scan complete (MFT + whole-volume carving)"
+                    );
+                }
+            }
         } else {
             info!(entries, "NTFS quick scan complete (MFT only)");
         }
