@@ -8,10 +8,11 @@ pub enum ExtError {
     Io(#[from] std::io::Error),
     #[error("disk error: {0}")]
     Disk(#[from] dw_disk::DiskError),
+    /// Volume is not ext2/3/4 (probe miss).
+    #[error("not an ext filesystem")]
+    NotExt,
     #[error("corrupt on-disk structure: {0}")]
     Corrupt(String),
     #[error("out of range: offset={offset}, len={len}")]
     OutOfRange { offset: u64, len: u64 },
-    #[error("not yet implemented: {0}")]
-    Todo(&'static str),
 }

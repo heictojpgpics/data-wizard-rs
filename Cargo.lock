@@ -448,16 +448,20 @@ dependencies = [
  "async-trait",
  "bytemuck",
  "bytes",
+ "dw-carver",
  "dw-core",
  "dw-disk",
  "dw-ipc",
+ "dw-signatures",
  "memmap2",
  "parking_lot",
  "serde",
  "tempfile",
  "thiserror",
+ "time",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
