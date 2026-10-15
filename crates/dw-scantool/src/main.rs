@@ -24,6 +24,7 @@ fn all_plugins() -> Vec<Arc<dyn FsPlugin>> {
         Arc::new(dw_exfat::ExfatPlugin),
         Arc::new(dw_ext::ExtPlugin),
         Arc::new(dw_hfs::HfsPlugin),
+        Arc::new(dw_btrfs::BtrfsPlugin),
     ]
 }
 

@@ -22,6 +22,7 @@ dw-fat       = { workspace = true }
 dw-exfat     = { workspace = true }
 dw-ext       = { workspace = true }
 dw-hfs       = { workspace = true }
+dw-btrfs     = { workspace = true }
 dw-signatures = { workspace = true }
 dw-carver     = { workspace = true }
 tokio        = { workspace = true }
