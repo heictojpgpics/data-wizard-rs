@@ -53,3 +53,8 @@ tarpaulin-report.html
 
 # Local CI scratch
 .ci-scratch/
+
+# Fuzz artifacts
+crates/*/fuzz/target/
+crates/*/fuzz/corpus/
+crates/*/fuzz/artifacts/

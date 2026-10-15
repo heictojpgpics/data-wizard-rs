@@ -1,0 +1,30 @@
+[package]
+name = "dw-ntfs-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dw-ntfs = { path = ".." }
+
+[[bin]]
+name = "fuzz_mft_record"
+path = "fuzz_targets/fuzz_mft_record.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_vbr_parse"
+path = "fuzz_targets/fuzz_vbr_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_filename_parse"
+path = "fuzz_targets/fuzz_filename_parse.rs"
+test = false
+doc = false

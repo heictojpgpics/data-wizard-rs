@@ -1,0 +1,24 @@
+[package]
+name = "dw-exfat-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dw-exfat = { path = ".." }
+
+[[bin]]
+name = "fuzz_boot_parse"
+path = "fuzz_targets/fuzz_boot_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_direntry_parse"
+path = "fuzz_targets/fuzz_direntry_parse.rs"
+test = false
+doc = false

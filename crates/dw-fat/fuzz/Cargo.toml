@@ -1,0 +1,30 @@
+[package]
+name = "dw-fat-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dw-fat = { path = ".." }
+
+[[bin]]
+name = "fuzz_bpb_parse"
+path = "fuzz_targets/fuzz_bpb_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_direntry_parse"
+path = "fuzz_targets/fuzz_direntry_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_fat_table"
+path = "fuzz_targets/fuzz_fat_table.rs"
+test = false
+doc = false
