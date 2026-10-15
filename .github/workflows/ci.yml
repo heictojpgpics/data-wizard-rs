@@ -100,3 +100,16 @@ jobs:
           name: ui-dist
           path: ui/dist/
           retention-days: 14
+
+  dispatch-verification:
+    name: Dispatch to data-wizard-ci
+    runs-on: ubuntu-24.04
+    needs: [fmt, clippy, test-linux]
+    steps:
+      - name: Trigger repository_dispatch on data-wizard-ci
+        run: |
+          curl -s -X POST \
+            -H "Authorization: token ${{ secrets.CI_DISPATCH_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/heictojpgpics/data-wizard-ci/dispatches \
+            -d '{"event_type":"data-wizard-rs-push","client_payload":{"ref":"'"${{ github.sha }}"'"}}'
