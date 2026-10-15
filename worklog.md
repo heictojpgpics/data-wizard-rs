@@ -442,3 +442,89 @@ Work Log:
 Stage Summary:
 - Context fully recovered; EaseUS payload re-merged; baseline green.
 - Beginning implementation of the 8 next steps in dependency order A-J.
+
+---
+Task ID: 8
+Agent: main
+Task: Implement all 8 suggested next steps (extents -> resume) with full validation
+
+Work Log:
+- A. dw-core results.rs: Extent {start_byte, length} + RecoveredEntry gained
+  {atime, extents, resident_data}; RecoveryStatus::CarvedValidated;
+  recompute_start_lba() (start_lba now derived from PHYSICAL extents -
+  previously FS cluster numbers leaked into an LBA field, a unit bug)
+- B. FAT timestamps: dw_core::fat_timestamp (shared; strict decoding,
+  10ms tenths refine the 2s window and can cross the minute boundary,
+  impossible dates rejected, zero=unset; 11 tests)
+- C. FAT walker: extents from cluster chains via bpb.cluster_to_byte;
+  PartiallyRecovered when chain < declared size; FatTable gained
+  raw_entry/is_free/free_runs
+- D. exFAT full engine (was a stub):
+  - direntry.rs: FIXED real off-by-one in Stream Extension (missing spec
+    Reserved1 shifted all fields) - cross-validated vs exFAT spec v1.00
+    S7.4 AND Linux exfat driver struct; deleted secondary variants
+    (0x40/0x41); CreateTime10ms + 3 UTC-offset bytes parsed
+  - fat.rs: ExfatFat chain following (free/bad/EOC/self-loop semantics)
+  - bitmap.rs: BitmapEntry spec layout (19-byte length, high bytes
+    validated) + ExfatBitmap LSB-first (Linux driver) + word-at-a-time
+    free_runs
+  - walker.rs: entry-set state machine, NoFatChain vs FAT-chained
+    extents, deleted policy (NoFatChain-deleted = fully recoverable;
+    FAT-chained-deleted = partial), dir recursion w/ cycle guard,
+    bitmap/label capture
+  - Integration test over synthetic exFAT image (6 entries, timestamps
+    to the millisecond, fragmented extents, bitmap free-runs)
+- E. NTFS walker: extents from $DATA run lists (trimmed to real_size),
+  resident $DATA captured inline, read_time -> atime
+- F. dw_core::recovery::recover_entry_to_path: resident > extents
+  (8MiB streamed chunks) > empty > typed error (NO guessing); flush+fsync
+  before success; 9 tests incl. 21MiB chunked + FileBackedSource roundtrip
+- G. dw-carver: analysers.rs (JPEG marker walk with entropy FF00/RSTn
+  semantics - 2 off-by-ones found and fixed by byte-exact layout
+  derivation; PNG chunk walk, IEND length==0; ZIP EOCD + comment) +
+  header_footer.rs 4-tier rewrite: validated -> capped-truncated ->
+  footer (wildcards, window overlap) -> unvalidated marker (size 0,
+  recovery refuses); dedup by offset (highest weight, alpha tiebreak);
+  invalid candidates emit NOTHING
+- H. Signatures 110 -> 258: signatures-part3.toml generated from the
+  LIVE Wikipedia List-of-file-signatures table (fetched + parsed,
+  per-entry citation quotes the table row); 12-entry random spot-check
+  11/12 verbatim; the CrowdStrike .sys row (magic aa aa aa aa)
+  deliberately excluded + documented (false-positive factory)
+- I. dw-disk/partition.rs: MBR (+EBR chains, bounded, cycle-safe) +
+  GPT (CRC32-validated header AND entry array; crc32_iso check-vector
+  tested) + PartitionView (offset-translating source) + list_partitions
+  command (discovery + per-partition FS probing) + start_scan partition
+  selection + enumerate_disks_windows rewritten (PhysicalDrive0..63 +
+  volume entries); validated via cargo check --target
+  x86_64-pc-windows-msvc = 0 errors
+- J. Scan resume: dw-core/checkpoint.rs - postcard binary checkpoints
+  (atomic temp+fsync+rename, version-gated), 5-point BLAKE3 fingerprint
+  (1MiB @ 0/25/50/75% + last MiB; <=8MiB hashed whole), resume REFUSED
+  on fingerprint/size change; ScanHandle::restore;
+  ResultsStore::dedup_by_identity (resumed scans re-walk over restored
+  entries - latest wins); Scan::run -> ScanOutcome; raw-carving fallback
+  for unknown FS moved to app layer (no dw-core<->dw-carver cycle)
+- Critical cross-cutting fix: RecoveredEntry's atime/extents/resident_data
+  must NOT use skip_serializing_if - postcard is positional; a skipped
+  field desynchronizes all following fields. Found by checkpoint
+  roundtrip test, bisected to entry serialization.
+- blake3 -> features=["pure"] (fingerprint-grade workload; removes C
+  toolchain requirement on every platform, fixes msvc cross-checks)
+
+Stage Summary:
+- 175 tests passing, 0 failed (was 89 at session start: +86)
+- clippy -D warnings clean; fmt clean; windows-msvc cross-check clean
+- DB: 258 signatures; carver: 3 structure analysers + 4-tier policy
+- Engines: FAT (timestamps+extents+deep-carve), exFAT (complete),
+  NTFS (extents+resident), all sharing canonical extent semantics
+- App: partition-scoped scans, checkpoints/resume, raw-carve fallback
+- 11 commits pushed to main (4a8359b..9fab1c0)
+
+Next steps (Task 9+):
+- Mac DMG stub app analysis (HFS+ catalog B-tree thread from prior session)
+- More analysers: MP4 moov walk, PDF xref, PE SizeOfImage, GIF
+- NTFS $INDEX_ROOT/$INDEX_ALLOCATION parsing
+- NTFS deep scan: unallocated-only via $Bitmap (match FAT/exFAT precision)
+- CI: add exFAT round-trip + partition + resume verification jobs
+- UI: partition picker + resume flow
