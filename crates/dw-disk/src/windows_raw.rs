@@ -1,8 +1,15 @@
-//! Windows raw-disk access via `DeviceIoControl` + `FSCTL_ALLOW_EXTENDED_DASD_IO`.
+//! Windows raw-disk access via `CreateFileW` + `ReadFile`.
 //!
 //! Only compiled on Windows. The rest of the codebase talks to disks
 //! through the [`DiskSource`](crate::DiskSource) trait, so this module is
 //! the only place that has to deal with Windows HANDLEs.
+//!
+//! # Safety
+//!
+//! This module uses `unsafe` for Win32 FFI (CreateFileW, ReadFile,
+//! GetFileSizeEx, CloseHandle). The HANDLE is wrapped in a struct that
+//! implements `Send` + `Sync` manually (Win32 HANDLEs are thread-safe
+//! for read operations).
 
 #![cfg(windows)]
 #![allow(unsafe_code)]
@@ -17,7 +24,8 @@ use bytes::Bytes;
 use parking_lot::Mutex;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, GetFileSizeEx,
+    OPEN_EXISTING, ReadFile,
 };
 use windows::Win32::System::IO::OVERLAPPED;
 use windows::core::PCWSTR;
@@ -25,8 +33,19 @@ use windows::core::PCWSTR;
 use crate::source::{DiskSource, ReadAt};
 use crate::{DiskError, DiskGeometry, DiskResult};
 
+/// Wrapper around a Win32 `HANDLE` that is `Send + Sync`.
+///
+/// Win32 handles are safe to share across threads for read operations
+/// (the OS synchronizes access internally). We wrap the raw `HANDLE`
+/// (which contains a `*mut c_void`) in this struct and implement `Send`
+/// + `Sync` manually.
+struct SendHandle(HANDLE);
+
+unsafe impl Send for SendHandle {}
+unsafe impl Sync for SendHandle {}
+
 pub struct WindowsRawSource {
-    handle: Mutex<HANDLE>,
+    handle: Mutex<SendHandle>,
     size: u64,
     geometry: DiskGeometry,
 }
@@ -44,7 +63,7 @@ impl WindowsRawSource {
         let handle = unsafe {
             CreateFileW(
                 PCWSTR(path_wide.as_ptr()),
-                windows::Win32::Storage::FileSystem::GENERIC_READ,
+                0x8000_0000, // GENERIC_READ
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 None,
                 OPEN_EXISTING,
@@ -52,11 +71,15 @@ impl WindowsRawSource {
                 None,
             )
         };
-        if handle == INVALID_HANDLE_VALUE {
-            return Err(DiskError::Windows(format!(
-                "CreateFileW failed for {path:?}"
-            )));
-        }
+        // The `windows` crate returns a `Result<HANDLE>` on error.
+        let handle = match handle {
+            Ok(h) if h != INVALID_HANDLE_VALUE => h,
+            _ => {
+                return Err(DiskError::Windows(format!(
+                    "CreateFileW failed for {path:?}"
+                )));
+            }
+        };
         let size = query_size(handle)?;
         let geometry = DiskGeometry {
             total_bytes: size,
@@ -66,7 +89,7 @@ impl WindowsRawSource {
             cylinders: 0,
         };
         Ok(Self {
-            handle: Mutex::new(handle),
+            handle: Mutex::new(SendHandle(handle)),
             size,
             geometry,
         })
@@ -76,47 +99,38 @@ impl WindowsRawSource {
 impl Drop for WindowsRawSource {
     fn drop(&mut self) {
         let h = self.handle.lock();
-        if *h != INVALID_HANDLE_VALUE {
-            let _ = unsafe { CloseHandle(*h) };
+        if h.0 != INVALID_HANDLE_VALUE && !h.0.is_invalid() {
+            let _ = unsafe { CloseHandle(h.0) };
         }
     }
 }
 
 fn query_size(handle: HANDLE) -> DiskResult<u64> {
-    let mut size = windows::Win32::Foundation::LARGE_INTEGER(0);
-    let ok = unsafe { windows::Win32::Storage::FileSystem::GetFileSizeEx(handle, &mut size) };
+    let mut size: i64 = 0;
+    // SAFETY: GetFileSizeEx takes a valid HANDLE and a pointer to a
+    // LARGE_INTEGER (which in Rust is just an i64).
+    let ok = unsafe { GetFileSizeEx(handle, &mut size) };
     if ok.is_err() {
         return Err(DiskError::Windows("GetFileSizeEx failed".into()));
     }
-    Ok(size.0 as u64)
+    Ok(size as u64)
 }
 
 impl ReadAt for WindowsRawSource {
     fn read_at(&self, offset: u64, buf: &mut [u8]) -> DiskResult<()> {
         let h = self.handle.lock();
-        if *h == INVALID_HANDLE_VALUE {
+        if h.0.is_invalid() {
             return Err(DiskError::Windows("invalid handle".into()));
         }
-        let overlapped = OVERLAPPED {
-            Internal: 0,
-            InternalHigh: 0,
-            Anonymous: windows::Win32::System::IO::DUMMYUNIONNAME {
-                Anonymous: windows::Win32::System::IO::DUMMYSTRUCTNAME {
-                    Offset: (offset & 0xFFFF_FFFF) as u32,
-                    OffsetHigh: (offset >> 32) as u32,
-                },
-            },
-            hEvent: windows::Win32::Foundation::HANDLE(std::ptr::null_mut()),
-        };
+        // Build OVERLAPPED for async-style positional read.
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+        overlapped.Anonymous.Offset = (offset & 0xFFFF_FFFF) as u32;
+        overlapped.Anononymous.OffsetHigh = (offset >> 32) as u32;
+
         let mut bytes_read: u32 = 0;
-        let ok = unsafe {
-            windows::Win32::Storage::FileSystem::ReadFile(
-                *h,
-                Some(buf),
-                &mut bytes_read,
-                Some(&{ overlapped } as *const _ as *mut _),
-            )
-        };
+        // SAFETY: ReadFile takes a valid HANDLE, a writable buffer, and
+        // an OVERLAPPED pointer. We pass all three correctly.
+        let ok = unsafe { ReadFile(h.0, Some(buf), &mut bytes_read, Some(&mut overlapped)) };
         if ok.is_err() || bytes_read as usize != buf.len() {
             return Err(DiskError::Windows(format!(
                 "ReadFile at offset {offset} got {bytes_read} of {} bytes",

@@ -57,26 +57,14 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
-      - name: Install Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: ui/package.json
-      - name: Install UI deps
-        working-directory: ui
-        run: npm ci || npm install
-      - name: Build UI
-        working-directory: ui
-        run: npm run build
-      - name: Build Rust workspace
+      - name: Build Rust workspace (release)
         run: cargo build --workspace --release
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-build
           path: |
-            target/release/dw-tauri.exe
+            target/release/*.exe
             target/release/*.dll
           retention-days: 14
 
@@ -89,3 +77,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --no-fail-fast
+
+  build-ui:
+    name: Build UI
+    runs-on: ubuntu-24.04
+    needs: [fmt, clippy]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Install UI deps
+        working-directory: ui
+        run: npm install
+      - name: Build UI
+        working-directory: ui
+        run: npm run build
+      - name: Upload UI dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-dist
+          path: ui/dist/
+          retention-days: 14
