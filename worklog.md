@@ -528,3 +528,52 @@ Next steps (Task 9+):
 - NTFS deep scan: unallocated-only via $Bitmap (match FAT/exFAT precision)
 - CI: add exFAT round-trip + partition + resume verification jobs
 - UI: partition picker + resume flow
+
+---
+Task ID: 9
+Agent: main
+Task: HFS+ engine (the interrupted Mac DMG thread), CI hardening, scantool extraction
+
+Work Log:
+- Reconstructed the Mac DMG (UDIF, 0 problems, 51.2MB) from the fresh
+  download; parsed its GPT (1 Apple HFS+ partition, sectors 40..99959)
+- Implemented the full HFS+ engine in dw-hfs (was a stub):
+  volumeheader (TN1150, BE; fork extents), btree (descriptor + geometry;
+  catalog node reads via fork mapping), catalog (records), walker
+  (leaf-chain walk, 2-pass CNID->path), plugin (probe + quick + deep
+  allocation-bitmap carving with header cross-check)
+- Empirical layout corrections driven by the REAL volume (all recorded
+  in recovarr docs/11 + code comments):
+  * node kinds: leaf=0xFF, header=0x01 (memory-based 1/2/3 was wrong)
+  * record types: folder=1, file=2 (was swapped)
+  * record sizes: folder=88, file=248 (88-byte base + forks at 88/168)
+  * reserved-CNID filter belongs on file_id, not parent_id
+- RESULT on the real volume: 58/58 entries (== VH fileCount), all with
+  mtime + extents, full paths; deep scan +76 carved from free blocks
+- STUB APP ANSWERED (session-3 question): 'Data Recovery Wizard
+  Installer.app' = Cocoa downloader wizard (ZZ*ViewCtl.nib UI, ~22 lproj
+  languages, libLog.dylib, Contents/Log/log_config.json); the real
+  engine is fetched at install time (mirrors the NSIS stub finding)
+- dw-scantool crate: standalone scanner CLI (probe all engines, scan,
+  --partitions listing + per-partition probing, --partition N scoped
+  scans) - moved out of src-tauri so CI verification does not need the
+  Tauri tree; tracing subscriber included
+- CI fixes (all found by the Windows runners):
+  * windows_raw.rs: unused import + unimplemented!() in as_read_at ->
+    Arc<Mutex<SendHandle>> sharing + WindowsRawReadAt (CloseHandle moved
+    to SendHandle::drop so the last owner closes)
+  * winchecksec asset: windows.x64.Release.zip (the old .exe URL 404s);
+    run against target\release\dw-scan.exe
+  * cargo audit: RUSTSEC-2023-0089 (atomic-polyfill, unmaintained) via
+    postcard->heapless 0.7 pin -> audit.toml ignore with justification
+  * verification.yml: T:\Docs typo, scan_volume -> dw-scan paths
+  * specta rc.22->rc.25 + tauri-specta rc.24->rc.25 (resolver conflict);
+    src-tauri now a standalone workspace root (synced deps table)
+
+Stage Summary:
+- 188 tests passing (+13 HFS); clippy 0 on host AND x86_64-pc-windows-msvc
+- Engines: NTFS, FAT, exFAT (complete), HFS+ (complete) - all with the
+  canonical extents model, timestamps, and deep-scan carving
+- Research loop closed: dw-hfs was built FROM the reference DMG volume
+  and validated back against it (58/58)
+- Remaining: check CI green on the new runs; then Item 5-8 todos
