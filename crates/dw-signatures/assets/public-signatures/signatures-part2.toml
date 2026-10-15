@@ -1,0 +1,833 @@
+# Public-source file signatures for data-wizard-rs.
+#
+# Part 2: expanded set from Gary Kessler's GCF File Signatures Table.
+# Each signature has a 'source' field citing where the magic came from.
+
+# ===== More image formats =====
+
+[[signature]]
+extension = "tif"
+mime = "image/tiff"
+header_offset = 0
+header_magic = "49 20 49"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 700
+source = "GCF: TIFF BigTIFF (II)"
+
+[[signature]]
+extension = "psd"
+mime = "image/vnd.adobe.photoshop"
+header_offset = 0
+header_magic = "38 42 50 53"
+tail_offset = 0
+min_size = 26
+max_size = 0
+weight = 990
+source = "GCF: Photoshop 8BPS"
+
+[[signature]]
+extension = "ico"
+mime = "image/x-icon"
+header_offset = 0
+header_magic = "00 00 01 00"
+tail_offset = 0
+min_size = 6
+max_size = 0
+weight = 800
+source = "GCF: Windows ICO"
+
+[[signature]]
+extension = "cur"
+mime = "image/x-cur"
+header_offset = 0
+header_magic = "00 00 02 00"
+tail_offset = 0
+min_size = 6
+max_size = 0
+weight = 800
+source = "GCF: Windows CUR"
+
+[[signature]]
+extension = "tga"
+mime = "image/x-tga"
+header_offset = 0
+header_magic = "54 52 55 45 56 49 53 49 4F 4E 2D 58 46 49 4C 45"
+tail_offset = 0
+min_size = 18
+max_size = 0
+weight = 900
+source = "GCF: Targa TRUEVISION-XFILE (footer)"
+
+[[signature]]
+extension = "dds"
+mime = "image/vnd.ms-dds"
+header_offset = 0
+header_magic = "44 44 53 20"
+tail_offset = 0
+min_size = 128
+max_size = 0
+weight = 990
+source = "GCF: DirectDraw Surface 'DDS '"
+
+[[signature]]
+extension = "xcf"
+mime = "image/x-xcf"
+header_offset = 0
+header_magic = "67 69 6D 70 20 78 63 66"
+tail_offset = 0
+min_size = 14
+max_size = 0
+weight = 990
+source = "GCF: GIMP 'gimp xcf'"
+
+[[signature]]
+extension = "svg"
+mime = "image/svg+xml"
+header_offset = 0
+header_magic = "3C 73 76 67"
+tail_offset = 0
+min_size = 50
+max_size = 0
+weight = 850
+source = "GCF: SVG '<svg'"
+
+# ===== More document formats =====
+
+[[signature]]
+extension = "ps"
+mime = "application/postscript"
+header_offset = 0
+header_magic = "25 21 50 53"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 980
+source = "GCF: PostScript '%!PS'"
+
+[[signature]]
+extension = "eps"
+mime = "application/eps"
+header_offset = 0
+header_magic = "25 21 50 53 2D 41 64 6F 62 65"
+tail_offset = 0
+min_size = 10
+max_size = 0
+weight = 990
+source = "GCF: EPS '%!PS-Adobe'"
+
+[[signature]]
+extension = "odt"
+mime = "application/vnd.oasis.opendocument.text"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP (ODT is ZIP-based — use structured carving)"
+
+[[signature]]
+extension = "ods"
+mime = "application/vnd.oasis.opendocument.spreadsheet"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP (ODS is ZIP-based)"
+
+[[signature]]
+extension = "odp"
+mime = "application/vnd.oasis.opendocument.presentation"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP (ODP is ZIP-based)"
+
+[[signature]]
+extension = "pages"
+mime = "application/x-iwork-pages-sffpages"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 400
+source = "GCF: ZIP (Pages is ZIP-based)"
+
+[[signature]]
+extension = "numbers"
+mime = "application/x-iwork-numbers-sffnumbers"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 400
+source = "GCF: ZIP (Numbers is ZIP-based)"
+
+[[signature]]
+extension = "key"
+mime = "application/x-iwork-keynote-sffkey"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 400
+source = "GCF: ZIP (Keynote is ZIP-based)"
+
+[[signature]]
+extension = "html"
+mime = "text/html"
+header_offset = 0
+header_magic = "3C 21 44 4F 43 54 59 50 45"
+tail_offset = 0
+min_size = 15
+max_size = 0
+weight = 900
+source = "GCF: HTML '<!DOCTYPE'"
+
+[[signature]]
+extension = "xml"
+mime = "application/xml"
+header_offset = 0
+header_magic = "3C 3F 78 6D 6C"
+tail_offset = 0
+min_size = 5
+max_size = 0
+weight = 850
+source = "GCF: XML '<?xml'"
+
+# ===== More archive formats =====
+
+[[signature]]
+extension = "tar"
+mime = "application/x-tar"
+header_offset = 257
+header_magic = "75 73 74 61 72"
+tail_offset = 0
+min_size = 263
+max_size = 0
+weight = 990
+source = "GCF: tar 'ustar' at offset 257"
+
+[[signature]]
+extension = "cab"
+mime = "application/vnd.ms-cab-compressed"
+header_offset = 0
+header_magic = "4D 53 43 46"
+tail_offset = 0
+min_size = 36
+max_size = 0
+weight = 990
+source = "GCF: CAB 'MSCF'"
+
+[[signature]]
+extension = "jar"
+mime = "application/java-archive"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP (JAR is ZIP-based)"
+
+[[signature]]
+extension = "apk"
+mime = "application/vnd.android.package-archive"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP (APK is ZIP-based)"
+
+[[signature]]
+extension = "war"
+mime = "application/x-webarchive"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP (WAR is ZIP-based)"
+
+[[signature]]
+extension = "xz"
+mime = "application/x-xz"
+header_offset = 0
+header_magic = "FD 37 7A 58 5A 00"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 999
+source = "GCF: xz \\xfd7zXZ\\x00"
+
+[[signature]]
+extension = "lz"
+mime = "application/x-lzip"
+header_offset = 0
+header_magic = "4C 5A 49 50"
+tail_offset = 0
+min_size = 6
+max_size = 0
+weight = 990
+source = "GCF: lzip 'LZIP'"
+
+[[signature]]
+extension = "zst"
+mime = "application/zstd"
+header_offset = 0
+header_magic = "28 B5 2F FD"
+tail_offset = 0
+min_size = 8
+max_size = 0
+weight = 990
+source = "GCF: Zstandard \\x28\\xb5\\x2f\\xfd"
+
+# ===== More audio formats =====
+
+[[signature]]
+extension = "aac"
+mime = "audio/aac"
+header_offset = 0
+header_magic = "FF F1"
+tail_offset = 0
+min_size = 7
+max_size = 0
+weight = 850
+source = "GCF: AAC ADTS frame sync"
+
+[[signature]]
+extension = "m4a"
+mime = "audio/mp4"
+header_offset = 4
+header_magic = "66 74 79 70 4D 34 41"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 900
+source = "GCF: M4A ftypM4A"
+
+[[signature]]
+extension = "opus"
+mime = "audio/ogg"
+header_offset = 0
+header_magic = "4F 67 67 53"
+tail_offset = 0
+min_size = 27
+max_size = 0
+weight = 850
+source = "GCF: OggS (Opus is OGG-based)"
+
+[[signature]]
+extension = "ape"
+mime = "audio/x-ape"
+header_offset = 0
+header_magic = "4D 41 43 20"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 990
+source = "GCF: Monkey's Audio 'MAC '"
+
+[[signature]]
+extension = "wv"
+mime = "audio/x-wavpack"
+header_offset = 0
+header_magic = "77 76 70 6B"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 990
+source = "GCF: WavPack 'wvpk'"
+
+[[signature]]
+extension = "tta"
+mime = "audio/x-tta"
+header_offset = 0
+header_magic = "54 54 41 31"
+tail_offset = 0
+min_size = 16
+max_size = 0
+weight = 990
+source = "GCF: TTA 'TTA1'"
+
+[[signature]]
+extension = "amr"
+mime = "audio/amr"
+header_offset = 0
+header_magic = "23 21 41 4D 52"
+tail_offset = 0
+min_size = 6
+max_size = 0
+weight = 990
+source = "GCF: AMR '#!AMR'"
+
+[[signature]]
+extension = "mid"
+mime = "audio/midi"
+header_offset = 0
+header_magic = "4D 54 68 64"
+tail_offset = 0
+min_size = 6
+max_size = 0
+weight = 990
+source = "GCF: MIDI 'MThd'"
+
+# ===== More video formats =====
+
+[[signature]]
+extension = "mov"
+mime = "video/quicktime"
+header_offset = 4
+header_magic = "66 74 79 70 71 74"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 900
+source = "GCF: MOV ftypqt"
+
+[[signature]]
+extension = "wmv"
+mime = "video/x-ms-wmv"
+header_offset = 0
+header_magic = "30 26 B2 75 8E 66 CF 11"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 990
+source = "GCF: Windows Media ASF"
+
+[[signature]]
+extension = "wma"
+mime = "audio/x-ms-wma"
+header_offset = 0
+header_magic = "30 26 B2 75 8E 66 CF 11"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 850
+source = "GCF: Windows Media ASF (same magic as WMV)"
+
+[[signature]]
+extension = "mpg"
+mime = "video/mpeg"
+header_offset = 0
+header_magic = "00 00 01 BA"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 980
+source = "GCF: MPEG Program Stream"
+
+[[signature]]
+extension = "vob"
+mime = "video/dvd"
+header_offset = 0
+header_magic = "00 00 01 BA"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 850
+source = "GCF: DVD VOB (same magic as MPEG)"
+
+[[signature]]
+extension = "3gp"
+mime = "video/3gpp"
+header_offset = 4
+header_magic = "66 74 79 70 33 67"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 900
+source = "GCF: 3GP ftyp3g"
+
+[[signature]]
+extension = "webm"
+mime = "video/webm"
+header_offset = 0
+header_magic = "1A 45 DF A3"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 980
+source = "GCF: WebM/Matroska EBML"
+
+# ===== More executable formats =====
+
+[[signature]]
+extension = "macho"
+mime = "application/x-mach-binary"
+header_offset = 0
+header_magic = "CF FA ED FE"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 990
+source = "GCF: Mach-O 64-bit LE"
+
+[[signature]]
+extension = "macho"
+mime = "application/x-mach-binary"
+header_offset = 0
+header_magic = "CE FA ED FE"
+tail_offset = 0
+min_size = 28
+max_size = 0
+weight = 990
+source = "GCF: Mach-O 32-bit LE"
+
+[[signature]]
+extension = "dex"
+mime = "application/x-dex"
+header_offset = 0
+header_magic = "64 65 78 0A"
+tail_offset = 0
+min_size = 112
+max_size = 0
+weight = 990
+source = "GCF: Android DEX 'dex\\n'"
+
+[[signature]]
+extension = "pyc"
+mime = "application/x-python-code"
+header_offset = 0
+header_magic = "42 0D 0D 0A"
+tail_offset = 0
+min_size = 16
+max_size = 0
+weight = 950
+source = "GCF: Python 3.7+ .pyc"
+
+# ===== More database formats =====
+
+[[signature]]
+extension = "db"
+mime = "application/x-berkeley-db"
+header_offset = 0
+header_magic = "00 05 31 06"
+tail_offset = 0
+min_size = 512
+max_size = 0
+weight = 850
+source = "GCF: Berkeley DB hash"
+
+[[signature]]
+extension = "mdb"
+mime = "application/x-msaccess"
+header_offset = 0
+header_magic = "00 01 00 00 53 74 61 6E 64 61 72 64 20 4A 65 74"
+tail_offset = 0
+min_size = 2048
+max_size = 0
+weight = 990
+source = "GCF: MS Access 'Standard Jet'"
+
+[[signature]]
+extension = "accdb"
+mime = "application/x-msaccess"
+header_offset = 0
+header_magic = "00 01 00 00 53 74 61 6E 64 61 72 64 20 41 43 45 20 44 42"
+tail_offset = 0
+min_size = 2048
+max_size = 0
+weight = 990
+source = "GCF: MS Access 2007+ 'Standard ACE DB'"
+
+[[signature]]
+extension = "dbf"
+mime = "application/x-dbf"
+header_offset = 0
+header_magic = "03"
+tail_offset = 0
+min_size = 32
+max_size = 0
+weight = 500
+source = "GCF: dBase III+ (single byte 0x03 — low confidence)"
+
+[[signature]]
+extension = "nsf"
+mime = "application/vnd.lotus-notes"
+header_offset = 0
+header_magic = "1A 00 00 04 00 00"
+tail_offset = 0
+min_size = 10
+max_size = 0
+weight = 900
+source = "GCF: Lotus Notes NSF"
+
+# ===== System / disk image formats =====
+
+[[signature]]
+extension = "vhd"
+mime = "application/x-vhd"
+header_offset = 0
+header_magic = "63 6F 6E 65 63 74 69 78"
+tail_offset = 0
+min_size = 512
+max_size = 0
+weight = 950
+source = "GCF: VHD 'conectix' footer"
+
+[[signature]]
+extension = "vhdx"
+mime = "application/x-vhdx"
+header_offset = 0
+header_magic = "76 68 64 78 66 69 6C 65"
+tail_offset = 0
+min_size = 1024
+max_size = 0
+weight = 990
+source = "GCF: VHDX 'vhdxfile'"
+
+[[signature]]
+extension = "qcow2"
+mime = "application/x-qemu-disk"
+header_offset = 0
+header_magic = "51 46 49 FB"
+tail_offset = 0
+min_size = 72
+max_size = 0
+weight = 999
+source = "GCF: QEMU QCOW2 'QFI\\xfb'"
+
+[[signature]]
+extension = "wim"
+mime = "application/x-ms-wim"
+header_offset = 0
+header_magic = "4D 53 57 49 4D"
+tail_offset = 0
+min_size = 80
+max_size = 0
+weight = 990
+source = "GCF: Windows Imaging 'MSWIM'"
+
+[[signature]]
+extension = "squashfs"
+mime = "application/x-squashfs"
+header_offset = 0
+header_magic = "68 73 71 73"
+tail_offset = 0
+min_size = 96
+max_size = 0
+weight = 990
+source = "GCF: SquashFS 'hsqs'"
+
+[[signature]]
+extension = "cramfs"
+mime = "application/x-cramfs"
+header_offset = 0
+header_magic = "45 3D CD 28"
+tail_offset = 0
+min_size = 512
+max_size = 0
+weight = 990
+source = "GCF: cramfs"
+
+[[signature]]
+extension = "ext"
+mime = "application/x-ext2"
+header_offset = 1080
+header_magic = "53 EF"
+tail_offset = 0
+min_size = 2048
+max_size = 0
+weight = 990
+source = "GCF: ext2/3/4 superblock magic at offset 1080"
+
+# ===== Font formats =====
+
+[[signature]]
+extension = "ttf"
+mime = "font/ttf"
+header_offset = 0
+header_magic = "00 01 00 00"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 850
+source = "GCF: TrueType \\x00\\x01\\x00\\x00"
+
+[[signature]]
+extension = "otf"
+mime = "font/otf"
+header_offset = 0
+header_magic = "4F 54 54 4F"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 990
+source = "GCF: OpenType 'OTTO'"
+
+[[signature]]
+extension = "woff"
+mime = "font/woff"
+header_offset = 0
+header_magic = "77 4F 46 46"
+tail_offset = 0
+min_size = 44
+max_size = 0
+weight = 990
+source = "GCF: WOFF 'wOFF'"
+
+[[signature]]
+extension = "eot"
+mime = "application/vnd.ms-fontobject"
+header_offset = 34
+header_magic = "4C 50"
+tail_offset = 0
+min_size = 36
+max_size = 0
+weight = 800
+source = "GCF: Embedded OpenType 'LP' at offset 34"
+
+# ===== Email formats =====
+
+[[signature]]
+extension = "pst"
+mime = "application/vnd.ms-outlook-pst"
+header_offset = 0
+header_magic = "21 42 44 4E"
+tail_offset = 0
+min_size = 564
+max_size = 0
+weight = 990
+source = "GCF: Outlook PST '!BDN'"
+
+[[signature]]
+extension = "ost"
+mime = "application/vnd.ms-outlook-ost"
+header_offset = 0
+header_magic = "21 42 44 4E"
+tail_offset = 0
+min_size = 564
+max_size = 0
+weight = 850
+source = "GCF: Outlook OST (same magic as PST)"
+
+[[signature]]
+extension = "eml"
+mime = "message/rfc822"
+header_offset = 0
+header_magic = "52 65 74 75 72 6E 2D 70 61 74 68 3A"
+tail_offset = 0
+min_size = 12
+max_size = 0
+weight = 800
+source = "GCF: Email 'Return-path:'"
+
+[[signature]]
+extension = "mbox"
+mime = "application/mbox"
+header_offset = 0
+header_magic = "46 72 6F 6D 20"
+tail_offset = 0
+min_size = 5
+max_size = 0
+weight = 500
+source = "GCF: mbox 'From ' (low confidence — common prefix)"
+
+# ===== Certificate / key formats =====
+
+[[signature]]
+extension = "p12"
+mime = "application/x-pkcs12"
+header_offset = 0
+header_magic = "30 82"
+tail_offset = 0
+min_size = 4
+max_size = 0
+weight = 500
+source = "GCF: PKCS#12 (ASN.1 SEQUENCE — low confidence)"
+
+[[signature]]
+extension = "pem"
+mime = "application/x-pem-file"
+header_offset = 0
+header_magic = "2D 2D 2D 2D 2D 42 45 47 49 4E"
+tail_offset = 0
+min_size = 10
+max_size = 0
+weight = 900
+source = "GCF: PEM '-----BEGIN'"
+
+# ===== Virtual machine formats =====
+
+[[signature]]
+extension = "ova"
+mime = "application/x-tar"
+header_offset = 0
+header_magic = "4F 56 46"
+tail_offset = 0
+min_size = 24
+max_size = 0
+weight = 700
+source = "GCF: OVF (tar-based)"
+
+# ===== Miscellaneous =====
+
+[[signature]]
+extension = "torrent"
+mime = "application/x-bittorrent"
+header_offset = 0
+header_magic = "64 38 3A 61 6E 6E 6F 75 6E 63 65"
+tail_offset = 0
+min_size = 11
+max_size = 0
+weight = 990
+source = "GCF: BitTorrent 'd8:announce'"
+
+[[signature]]
+extension = "lnk"
+mime = "application/x-ms-shortcut"
+header_offset = 0
+header_magic = "4C 00 00 00"
+tail_offset = 0
+min_size = 76
+max_size = 0
+weight = 850
+source = "GCF: Windows Shortcut 'L\\x00\\x00\\x00'"
+
+[[signature]]
+extension = "chm"
+mime = "application/vnd.ms-htmlhelp"
+header_offset = 0
+header_magic = "49 54 53 46"
+tail_offset = 0
+min_size = 96
+max_size = 0
+weight = 990
+source = "GCF: Compiled HTML Help 'ITSF'"
+
+[[signature]]
+extension = "epub"
+mime = "application/epub+zip"
+header_offset = 0
+header_magic = "50 4B 03 04"
+tail_offset = 0
+min_size = 22
+max_size = 0
+weight = 500
+source = "GCF: ZIP (EPUB is ZIP-based)"
+
+[[signature]]
+extension = "mobi"
+mime = "application/x-mobipocket-ebook"
+header_offset = 60
+header_magic = "42 4F 4F 4B 4D 4F 42 49"
+tail_offset = 0
+min_size = 68
+max_size = 0
+weight = 990
+source = "GCF: Mobipocket 'BOOKMOBI' at offset 60"
