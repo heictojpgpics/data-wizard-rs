@@ -20,7 +20,7 @@ use tracing::{debug, info, trace, warn};
 use uuid::Uuid;
 
 use dw_core::{
-    CoreError, CoreResult, Extent, ProgressEvent, ProgressPhase, ProgressSink, RecoveredEntry,
+    CoreError, CoreResult, ProgressEvent, ProgressPhase, ProgressSink, RecoveredEntry,
     RecoveredEntryId, RecoveryStatus, ResultsStore, ScanMode,
 };
 use dw_disk::{DiskSource, ReadAt};
@@ -31,10 +31,13 @@ use crate::error::FatError;
 use crate::fat::FatTable;
 use crate::timestamp::{decode_fat_access_date, decode_fat_datetime};
 
+pub use dw_core::merge_and_trim_offsets;
+
 /// Walk the FAT directory tree and append entries to `results`.
 pub async fn walk_fat(
     source: Arc<dyn DiskSource>,
     bpb: &FatBpb,
+    fat_table: &FatTable<'_>,
     mode: ScanMode,
     results: Arc<ResultsStore>,
     progress: Arc<dyn ProgressSink>,
@@ -49,16 +52,6 @@ pub async fn walk_fat(
         mode = ?mode,
         "Starting FAT walk"
     );
-
-    // Read the FAT table.
-    let fat_offset = bpb.fat_offset_bytes();
-    let fat_size = u64::from(bpb.fat_size_sectors) * u64::from(bpb.bytes_per_sector);
-    let mut fat_data = vec![0u8; fat_size as usize];
-    read_at
-        .read_at(fat_offset, &mut fat_data)
-        .map_err(CoreError::Disk)?;
-    let fat_table = FatTable::new(&fat_data, bpb.kind)
-        .map_err(|e| CoreError::Plugin(format!("FAT table parse: {e}")))?;
 
     // Collect all entries by walking the directory tree.
     let mut entries_emitted: u64 = 0;
@@ -90,7 +83,7 @@ pub async fn walk_fat(
                 &root_buf,
                 "\\",
                 None, // no cluster chain for FAT12/16 root
-                &fat_table,
+                fat_table,
                 bpb,
                 &read_at,
                 &results,
@@ -107,7 +100,7 @@ pub async fn walk_fat(
             walk_directory_chain(
                 root_cluster,
                 "\\",
-                &fat_table,
+                fat_table,
                 bpb,
                 &read_at,
                 &results,
@@ -398,38 +391,4 @@ fn process_short_entry(
     }
 
     Ok(())
-}
-
-/// Merge a list of ascending byte offsets (each `step` bytes long) into
-/// contiguous extents and trim the total to `file_size`.
-///
-/// Shared by the FAT walker (`bpb.cluster_to_byte` offsets) and the exFAT
-/// walker (`boot.cluster_to_byte` offsets). Consecutive offsets merge into
-/// one extent; the final extent is cut so `sum(length) == file_size` when
-/// the underlying chain covers at least `file_size` bytes; a shorter chain
-/// yields shorter extents (the caller marks the entry PartiallyRecovered).
-pub fn merge_and_trim_offsets(offsets: &[u64], step: u64, file_size: u64) -> Vec<Extent> {
-    let mut extents: Vec<Extent> = Vec::new();
-    let mut remaining = file_size;
-
-    for &off in offsets {
-        if remaining == 0 {
-            break;
-        }
-        let want = step.min(remaining);
-        // Extend the previous extent if contiguous, else push a new one.
-        if let Some(last) = extents.last_mut()
-            && last.start_byte + last.length == off
-        {
-            last.length += want;
-        } else {
-            extents.push(Extent {
-                start_byte: off,
-                length: want,
-            });
-        }
-        remaining -= want;
-    }
-
-    extents
 }

@@ -26,12 +26,16 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod error;
+pub mod extents;
+pub mod fat_timestamp;
 pub mod plugin;
 pub mod progress;
 pub mod results;
 pub mod scan;
 
 pub use error::{CoreError, CoreResult};
+pub use extents::merge_and_trim_offsets;
+pub use fat_timestamp::{decode_fat_access_date, decode_fat_datetime};
 pub use plugin::{FsPlugin, FsProbe, ProbeOutcome, ScanMode};
 pub use progress::{ProgressEvent, ProgressPhase, ProgressSink};
 pub use results::{Extent, RecoveredEntry, RecoveredEntryId, RecoveryStatus, ResultsStore};

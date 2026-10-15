@@ -23,6 +23,10 @@ bytemuck     = { workspace = true }
 memmap2      = { workspace = true }
 parking_lot  = { workspace = true }
 serde        = { workspace = true }
+uuid         = { workspace = true }
+dw-signatures = { workspace = true }
+dw-carver     = { workspace = true }
+time         = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3.27"

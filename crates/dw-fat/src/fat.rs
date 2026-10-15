@@ -202,9 +202,101 @@ impl<'a> FatTable<'a> {
     }
 }
 
+impl<'a> FatTable<'a> {
+    /// Raw entry value for `cluster`, 0 = free. Out-of-bounds reads are
+    /// reported as 0xFFFF_FFFF (never free): a cluster beyond the table
+    /// cannot be carved as unallocated space.
+    pub fn raw_entry(&self, cluster: u32) -> u32 {
+        let v: u32 = match self.kind {
+            FatKind::Fat12 => match self.get_fat12_entry(cluster) {
+                Ok(e) => u32::from(e),
+                Err(_) => 0xFFFF_FFFF,
+            },
+            FatKind::Fat16 => match self.get_fat16_entry(cluster) {
+                Ok(e) => u32::from(e),
+                Err(_) => 0xFFFF_FFFF,
+            },
+            FatKind::Fat32 => self.get_fat32_entry(cluster).unwrap_or(0xFFFF_FFFF),
+        };
+        v
+    }
+
+    /// Is `cluster` free (raw entry == 0)?
+    pub fn is_free(&self, cluster: u32) -> bool {
+        self.raw_entry(cluster) == 0
+    }
+
+    /// Iterate free runs over clusters 2..cluster_count+2 as
+    /// `(first_cluster, run_len_clusters)`.
+    ///
+    /// Used by the deep scan to carve exactly the unallocated regions:
+    /// deleted files have their FAT entries zeroed, so their remnants
+    /// live precisely in these runs.
+    pub fn free_runs(&self, cluster_count: u32) -> Vec<(u32, u32)> {
+        let mut runs: Vec<(u32, u32)> = Vec::new();
+        let end = cluster_count.saturating_add(2);
+        let mut cluster: u32 = 2;
+        while cluster < end {
+            if self.is_free(cluster) {
+                let first = cluster;
+                while cluster < end && self.is_free(cluster) {
+                    cluster += 1;
+                }
+                let len = cluster - first;
+                if let Some(last) = runs.last_mut()
+                    && last.0 + last.1 == first
+                {
+                    last.1 += len;
+                } else {
+                    runs.push((first, len));
+                }
+            } else {
+                cluster += 1;
+            }
+        }
+        runs
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_runs_over_fat16_table() {
+        // FAT16 table: entries 2..10: 2=3(used),3=4(used),4=EOC(used chain),
+        // 5..7 free, 8=EOC?? -> use: 5,6,7 free (0), 8=9, 9=EOC, 10..12 free
+        let mut fat = vec![0u8; 32]; // 16 entries
+        fat[0..2].copy_from_slice(&0xFFF8u16.to_le_bytes());
+        fat[2..4].copy_from_slice(&0xFFF8u16.to_le_bytes());
+        // entry 2: 3 (allocated)
+        fat[4..6].copy_from_slice(&3u16.to_le_bytes());
+        // entry 3: 4
+        fat[6..8].copy_from_slice(&4u16.to_le_bytes());
+        // entry 4: EOC
+        fat[8..10].copy_from_slice(&0xFFFFu16.to_le_bytes());
+        // entries 5,6,7: free (0) - already zero
+        // entry 8: 9
+        fat[16..18].copy_from_slice(&9u16.to_le_bytes());
+        // entry 9: EOC
+        fat[18..20].copy_from_slice(&0xFFFFu16.to_le_bytes());
+        // entries 10,11,12: free
+        let table = FatTable::new(&fat, FatKind::Fat16).unwrap();
+        let runs = table.free_runs(11); // clusters 2..13
+        // free: 5..8 (3), 10..13 (3)
+        assert_eq!(runs, vec![(5u32, 3u32), (10u32, 3u32)]);
+    }
+
+    #[test]
+    fn is_free_and_raw_entry() {
+        let mut fat = vec![0u8; 32];
+        fat[4..6].copy_from_slice(&3u16.to_le_bytes()); // entry 2 = 3
+        let table = FatTable::new(&fat, FatKind::Fat16).unwrap();
+        assert!(!table.is_free(2));
+        assert!(table.is_free(3));
+        // out-of-bounds is never free
+        assert!(!table.is_free(999));
+    }
 
     fn make_fat16_table() -> Vec<u8> {
         // 10-entry FAT16 table

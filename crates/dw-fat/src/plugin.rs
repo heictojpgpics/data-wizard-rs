@@ -7,7 +7,10 @@ use dw_core::{CoreResult, FsPlugin, FsProbe, ProbeOutcome, ProgressSink, Results
 use dw_disk::DiskSource;
 use tracing::info;
 
+use dw_signatures::SignatureDb;
+
 use crate::bpb::{FatBpb, FatKind};
+use crate::fat::FatTable;
 use crate::walker::walk_fat;
 
 pub struct FatPlugin;
@@ -82,9 +85,64 @@ impl FsPlugin for FatPlugin {
 
         info!(kind = ?bpb.kind, mode = ?mode, "Starting FAT scan");
 
-        let entries = walk_fat(source, &bpb, mode, results.clone(), progress.clone()).await?;
+        // Read the FAT region once; shared by the walker and (in Deep
+        // mode) the free-run computation for the carving pass.
+        let fat_offset = bpb.fat_offset_bytes();
+        let fat_size = u64::from(bpb.fat_size_sectors) * u64::from(bpb.bytes_per_sector);
+        let mut fat_data = vec![0u8; fat_size as usize];
+        source
+            .as_read_at()
+            .read_at(fat_offset, &mut fat_data)
+            .map_err(dw_core::CoreError::Disk)?;
+        let fat_table = FatTable::new(&fat_data, bpb.kind)
+            .map_err(|e| dw_core::CoreError::Plugin(format!("FAT table parse: {e}")))?;
 
-        info!(entries, "FAT scan complete");
+        let entries = walk_fat(
+            source.clone(),
+            &bpb,
+            &fat_table,
+            mode,
+            results.clone(),
+            progress.clone(),
+        )
+        .await?;
+
+        if mode == ScanMode::Deep {
+            // Deep phase: carve exactly the unallocated runs. Deleted
+            // files have their FAT entries zeroed, so their remnants live
+            // in these runs; allocated clusters are skipped entirely.
+            let runs = fat_table.free_runs(bpb.count_of_clusters);
+            let cluster_size = u64::from(bpb.bytes_per_cluster);
+            let db = SignatureDb::from_embedded();
+            let scan_id = uuid::Uuid::now_v7();
+            let read_at = source.as_read_at();
+            let mut carved_total = 0u64;
+            for &(first, len) in &runs {
+                let start = bpb.cluster_to_byte(first);
+                let length = u64::from(len) * cluster_size;
+                let carved = dw_carver::header_footer::carve_region(
+                    read_at.as_ref(),
+                    start,
+                    length,
+                    &db,
+                    &results,
+                    &progress,
+                    scan_id,
+                    1 << 20,
+                )
+                .unwrap_or(0);
+                carved_total += carved;
+            }
+            info!(
+                entries,
+                carved = carved_total,
+                runs = runs.len(),
+                "FAT deep scan complete (walk + carving)"
+            );
+        } else {
+            info!(entries, "FAT quick scan complete (walk only)");
+        }
+
         Ok(())
     }
 }
