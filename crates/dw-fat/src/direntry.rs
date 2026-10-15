@@ -55,7 +55,7 @@
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::error::{FatError, FatResult};
+use crate::error::FatResult;
 
 /// Directory entry attributes.
 pub mod attr {
