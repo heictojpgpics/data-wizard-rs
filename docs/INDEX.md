@@ -29,6 +29,16 @@ the design of `data-wizard-rs`.
 - We did NOT bypass, patch, or emulate any license/activation check.
 - We did NOT redistribute any third-party binaries.
 
+## Reference-project technique notes
+
+[`research/reference-repos-techniques.md`](research/reference-repos-techniques.md)
+records the architecture patterns extracted from four open-source disk
+and system utilities (disktree, dua-cli, WinMemoryCleaner, cleaner) that
+informed this codebase: tally-batched atomic progress, bounded result
+channels, three-layer cancellation, phase-machine UI state, and honest
+loss-oriented copy. Each adopted pattern cites the source file it came
+from.
+
 ## Documentation map
 
 | Document | Purpose |

@@ -577,3 +577,121 @@ Stage Summary:
 - Research loop closed: dw-hfs was built FROM the reference DMG volume
   and validated back against it (58/58)
 - Remaining: check CI green on the new runs; then Item 5-8 todos
+
+---
+Task ID: 10 (session 5)
+Agent: main
+Task: P0/P1 production hardening from the external review + refactoring
+pass + benchmarks + CI repair (draft branch)
+
+Work Log:
+- Context recovery: verified every review finding against HEAD first
+  (the review targeted commit 4e08726; several findings were already
+  fixed, the rest were confirmed and fixed this session)
+- P0 dw-disk: read_exact_at fills buffers or fails with typed ShortRead
+  (old code discarded the read count: short reads surfaced as zero-filled
+  success); async reads capped at 32 MiB (RequestTooLarge); windows_raw
+  capped too; +4 tests
+- P0 dw-core results: REAL spill-to-disk store (the old "bounded" store
+  inserted past capacity forever): length-prefixed postcard frames,
+  FIFO eviction of oldest resident entry, positional reads safe under
+  the read lock, fail-open on spill errors (memory pressure beats data
+  loss), drop-time file cleanup, page() over both tiers, dedup across
+  tiers; +6 tests
+- P0 dw-core recovery: no-clobber contract (temp + fsync + publish;
+  hard_link no-replace with checked-rename fallback for FAT/exFAT
+  destinations), CollisionPolicy {Error,KeepBoth,Overwrite}, "name (n)"
+  collision slots, dest dir fsync, preflight_destination (fs4 free-space
+  + source!=dest guard); +9 tests
+- P1 dw-signatures matcher: bucketed first-concrete-byte scan with a
+  dense 256-entry direct table (replaces per-position binary search),
+  magic slices borrowed into bucket entries so verification never
+  pointer-chases db.signatures, scan_limit for chunk-boundary
+  attribution, checked header_offset arithmetic (the old code
+  underflowed); full-DB coverage test proves no signature is lost to
+  bucketing
+- P1 dw-carver: parallel worker pool (scoped threads, cap 8, chunk
+  striding), overlapped chunk reads (max_magic-1) so headers straddling
+  chunk boundaries are found exactly once, cooperative cancel flag,
+  progress callback, checked region arithmetic; +8 tests incl. boundary
+  straddling and immediate cancel
+- Cancellation threaded end to end: ScanHandle.cancel_flag (Arc<AtomicBool>)
+  -> FsPlugin::scan(cancel) -> carve workers; cancel_scan command fires
+  both the flag and the state; dw-scan CLI wires Ctrl-C
+- App layer (src-tauri): fixed the CarvedValidated non-exhaustive match
+  (the compile blocker: the app had never been compiled), status_to_dto
+  in one place, list_results paginates via page() (no whole-store clone),
+  recover_files rewritten (policy + preflight + per-file outcomes +
+  recovery:progress events + partial warnings), scan_stats command
+  (age map/categories/statuses via new dw-core::classify), open_source
+  unifies WindowsRawSource for \\.\ paths, per-scan spill dir,
+  GetDriveTypeW removable detection, GetWindowsDirectoryW system drive
+  (was hardcoded C:), raw-carve fallback drops the state lock before
+  awaiting (latent Send violation + deadlock)
+- Capabilities narrowed to dialog/log/window-state; fs/shell/process/
+  notification/opener plugins removed from main.rs + Cargo.toml + UI
+  deps; protocol-asset dropped; CSP de-scoped from asset:; real icons
+  (the old .ico had a bad Reserved field, llvm-rc refused it)
+- UI: full results experience - stat cards, category chips, bytes-by-
+  last-modified-month age map (real scan_stats data; no-timestamp files
+  reported honestly instead of hidden), sortable paged table with
+  selection, recovery flow (destination picker, collision policy with
+  plain-language hints, live progress, per-run summary), phase timeline
+  scanning view, saved-scan resume, view transitions + reduced-motion
+- Benchmarks (criterion): matcher 88 MiB/s random, 20 MiB/s zero-filled
+  worst case, 90 MiB/s seeded; end-to-end carve 230 MiB/s (8 workers,
+  2-core host). Bench profile aligned with release (fat LTO,
+  codegen-units 1) after thin LTO failed to inline across codegen units
+  (10x swing in numbers); hot helpers marked #[inline]
+- Checkpoints v2: streaming save (meta frame + per-entry frames from
+  4096-entry pages; no full-copy spike), v1 legacy load, count-mismatch
+  refusal when racing a live scan; +2 tests
+- CI repaired: winchecksec release zip contains a full CMake tree and
+  'Select-Object -First 1' grabbed CompilerIdC.exe (why ASLR "was
+  missing"); pinned to build/Release/winchecksec.exe + vcredist140 +
+  --format json + exit-code checks; branch filters extended to draft in
+  both repos; ci.yml now forwards the branch name (was forwarding the
+  sha, so draft pushes tested main)
+- Windows runner caught a real bug Linux never could: recovery tests
+  recovered onto NamedTempFile paths whose open handle blocks
+  MoveFileEx(REPLACE_EXISTING) (os error 5); destinations are now plain
+  paths
+- Deps: criterion 0.8, flume 0.12, fs4 1.1, toml 1.1, npm vite 8 /
+  eslint 10 / plugin-react 6 / react-hooks 7 (TS stays 5.9 until
+  typescript-eslint supports 7); eslint 9->10 flat config added (lint
+  never actually ran before); react-hooks v7 set-state-in-effect rule
+  fixed properly (derived loading state)
+- Display-layer gotcha re-confirmed and documented: '[m' sequences are
+  eaten as ANSI escapes by the tooling display, so '[main]' SHOWS as
+  'ain]' and '#[must_use]' as '#ust_use]'. ALWAYS verify bracket content
+  by hex, never by eye. A previous session's sed mangling theory was
+  wrong; the files were fine all along.
+- skills/ (61 MiB, 1076 unrelated platform files) removed from the repo
+- UI dist built and embedded; src-tauri cross-checks clean on
+  x86_64-pc-windows-msvc from Linux (needs llvm-rc extracted from the
+  llvm-19 .deb into PATH; documented in scripts/)
+
+Stage Summary:
+- 234 tests passing (was 197 at session start: +37), clippy -D warnings
+  clean, fmt clean, UI typecheck+lint+build clean, src-tauri msvc
+  cross-check clean
+- All Blocker/Critical/High findings from the review resolved or
+  explicitly deferred with reasons; Medium items: capabilities (done),
+  skills removal (done), streaming checkpoints (done), sector-size
+  query still TODO (real-device geometry needs Windows-only IOCTL work,
+  tracked below)
+- Benchmarks recorded; next optimization: two-byte bucket filter or
+  Commentz-Walter automaton for zero-heavy regions (20 MiB/s single
+  thread worst case)
+- Deferred with reasons: UI e2e tests (need Windows + WebView2; CI
+  groundwork exists), sector-size query (IOCTL_STORAGE_GET_DRIVE_GEOMETRY
+  on real devices only), deeper NTFS $INDEX parsing (next engine wave)
+
+Next steps:
+- Watch CI green on both repos (draft); merge draft -> main when green
+- ext4 engine (the largest remaining stub) from the documented ext4
+  layout notes
+- NTFS $INDEX_ROOT/$INDEX_ALLOCATION parsing for deleted-dir recovery
+- Two-byte bucket filter for the matcher worst case
+- Windows-runner UI smoke test (launch the built app, screenshot, click
+  through scan on a fixture image)

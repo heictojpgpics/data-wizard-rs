@@ -12,11 +12,17 @@
 //!    their extents, so recovered-file I/O works after resume without
 //!    rescanning).
 //!
-//! Serialization: `postcard` binary frames, written atomically
-//! (temp file + rename) so a crash mid-write never corrupts an existing
-//! checkpoint. Version field gates format evolution; unknown versions
-//! are refused rather than guessed.
+//! Serialization: framed `postcard` binary. Version 2 streams the save:
+//! a metadata frame first, then one length-prefixed frame per entry,
+//! pulled from the results store in bounded pages — a multi-million-entry
+//! scan no longer materializes a second full copy of itself in RAM just
+//! to write its checkpoint. Version 1 files (monolithic postcard blob)
+//! still load. Both versions are written atomically (temp file + fsync +
+//! rename) so a crash mid-write never corrupts an existing checkpoint;
+//! the version field gates format evolution; unknown versions are
+//! refused rather than guessed.
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -30,14 +36,35 @@ use crate::scan::{ScanConfig, ScanHandle, ScanState};
 use crate::{CoreError, CoreResult};
 use dw_disk::ReadAt;
 
-pub const CHECKPOINT_VERSION: u32 = 1;
+pub const CHECKPOINT_VERSION: u32 = 2;
+/// The legacy monolithic format (pre-streaming).
+const CHECKPOINT_VERSION_V1: u32 = 1;
+/// How many entries a streaming save pulls from the store per page.
+const SAVE_PAGE: usize = 4096;
 
 /// Fingerprint window size (1 MiB).
 const FINGERPRINT_WINDOW: u64 = 1024 * 1024;
 /// Sources at or below this size are hashed whole (8 MiB).
 const FINGERPRINT_WHOLE_MAX: u64 = 8 * 1024 * 1024;
 
-/// Serialized checkpoint.
+/// Metadata frame of a v2 checkpoint (everything but the entries).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckpointMeta {
+    pub version: u32,
+    pub scan_id: Uuid,
+    /// ISO-8601 creation timestamp.
+    pub created_at: OffsetDateTime,
+    pub source_uri: String,
+    pub source_size: u64,
+    /// BLAKE3-256 over the sampled windows.
+    pub source_fingerprint: [u8; 32],
+    pub config: ScanConfig,
+    pub state: ScanState,
+    /// Number of entry frames that follow the meta frame.
+    pub entry_count: u64,
+}
+
+/// Serialized checkpoint (fully materialized; the load-side type).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanCheckpoint {
     pub version: u32,
@@ -80,7 +107,8 @@ impl CheckpointStore {
     }
 
     /// Persist a snapshot of `handle` against `source_uri`.
-    /// The source is fingerprinted NOW (via `read_at`).
+    /// The source is fingerprinted NOW (via `read_at`). Entries stream
+    /// from the store in bounded pages (v2 format): no full-copy spike.
     pub fn save(
         &self,
         handle: &ScanHandle,
@@ -90,7 +118,8 @@ impl CheckpointStore {
         let size = read_at.size();
         let fingerprint = fingerprint_source(read_at)?;
         let results = handle.results();
-        let cp = ScanCheckpoint {
+        let entry_count = results.len() as u64;
+        let meta = CheckpointMeta {
             version: CHECKPOINT_VERSION,
             scan_id: handle.id(),
             created_at: OffsetDateTime::now_utc(),
@@ -99,31 +128,64 @@ impl CheckpointStore {
             source_fingerprint: fingerprint,
             config: handle.config(),
             state: handle.state(),
-            entries: results.snapshot(),
+            entry_count,
         };
-        self.write(&cp)?;
+        self.write_streamed(&meta, &results)?;
         info!(
-            scan_id = %cp.scan_id,
-            entries = cp.entries.len(),
-            "Checkpoint saved"
+            scan_id = %meta.scan_id,
+            entries = entry_count,
+            "Checkpoint saved (streamed)"
         );
-        Ok(cp.scan_id)
+        Ok(meta.scan_id)
     }
 
-    fn write(&self, cp: &ScanCheckpoint) -> CoreResult<()> {
+    /// v2 writer: meta frame, then length-prefixed entry frames pulled
+    /// from the store in `SAVE_PAGE` pages.
+    fn write_streamed(
+        &self,
+        meta: &CheckpointMeta,
+        results: &crate::results::ResultsStore,
+    ) -> CoreResult<()> {
         std::fs::create_dir_all(&self.dir)
             .map_err(|e| CoreError::Plugin(format!("create checkpoint dir: {e}")))?;
-        let bytes = postcard::to_stdvec(cp)
-            .map_err(|e| CoreError::Plugin(format!("serialize checkpoint: {e}")))?;
-        let final_path = self.path_for(cp.scan_id);
-        let tmp_path = self.dir.join(format!("{}.tmp", cp.scan_id));
-        // Atomic publish: write temp, fsync, rename.
+        let final_path = self.path_for(meta.scan_id);
+        let tmp_path = self.dir.join(format!("{}.tmp", meta.scan_id));
         let f = std::fs::File::create(&tmp_path)
             .map_err(|e| CoreError::Plugin(format!("create tmp checkpoint: {e}")))?;
-        let mut w = std::io::BufWriter::new(f);
-        use std::io::Write;
-        w.write_all(&bytes)
-            .map_err(|e| CoreError::Plugin(format!("write checkpoint: {e}")))?;
+        let mut w = std::io::BufWriter::with_capacity(1 << 20, f);
+
+        write_frame(&mut w, meta)
+            .map_err(|e| CoreError::Plugin(format!("write checkpoint meta: {e}")))?;
+
+        let mut written: u64 = 0;
+        let mut offset: usize = 0;
+        loop {
+            let page = results.page(offset, SAVE_PAGE);
+            if page.is_empty() {
+                break;
+            }
+            for entry in &page {
+                write_frame(&mut w, entry)
+                    .map_err(|e| CoreError::Plugin(format!("write entry frame: {e}")))?;
+                written += 1;
+            }
+            offset += page.len();
+            if page.len() < SAVE_PAGE {
+                break;
+            }
+        }
+        if written != meta.entry_count {
+            // The store changed under us (a live scan inserted more).
+            // The file is still a consistent, count-honest snapshot if we
+            // rewrite the meta count... but the meta frame is already
+            // written. Refuse instead of shipping a mismatched file.
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(CoreError::Plugin(format!(
+                "results changed during save ({} written, {} expected); retry",
+                written, meta.entry_count
+            )));
+        }
+
         w.flush()
             .map_err(|e| CoreError::Plugin(format!("flush checkpoint: {e}")))?;
         w.get_ref()
@@ -168,15 +230,47 @@ impl CheckpointStore {
     fn load_path(&self, path: &Path) -> CoreResult<ScanCheckpoint> {
         let bytes =
             std::fs::read(path).map_err(|e| CoreError::Plugin(format!("read checkpoint: {e}")))?;
-        let cp: ScanCheckpoint = postcard::from_bytes(&bytes)
-            .map_err(|e| CoreError::Plugin(format!("deserialize checkpoint: {e}")))?;
-        if cp.version != CHECKPOINT_VERSION {
-            return Err(CoreError::Plugin(format!(
-                "checkpoint version {} != supported {}",
-                cp.version, CHECKPOINT_VERSION
-            )));
+        // v2 files are framed (meta first). Detect by peeking the meta
+        // frame; fall back to the v1 monolithic blob.
+        match read_frame::<CheckpointMeta>(&bytes) {
+            Ok((meta, consumed)) if meta.version == CHECKPOINT_VERSION => {
+                let mut entries = Vec::with_capacity(
+                    usize::try_from(meta.entry_count)
+                        .unwrap_or(0)
+                        .min(5_000_000),
+                );
+                let mut rest = &bytes[consumed..];
+                for _ in 0..meta.entry_count {
+                    let (entry, used) = read_frame::<RecoveredEntry>(rest)
+                        .map_err(|e| CoreError::Plugin(format!("entry frame: {e}")))?;
+                    entries.push(entry);
+                    rest = &rest[used..];
+                }
+                Ok(ScanCheckpoint {
+                    version: meta.version,
+                    scan_id: meta.scan_id,
+                    created_at: meta.created_at,
+                    source_uri: meta.source_uri,
+                    source_size: meta.source_size,
+                    source_fingerprint: meta.source_fingerprint,
+                    config: meta.config,
+                    state: meta.state,
+                    entries,
+                })
+            }
+            _ => {
+                let cp: ScanCheckpoint = postcard::from_bytes(&bytes)
+                    .map_err(|e| CoreError::Plugin(format!("deserialize checkpoint: {e}")))?;
+                if cp.version == CHECKPOINT_VERSION_V1 {
+                    Ok(cp)
+                } else {
+                    Err(CoreError::Plugin(format!(
+                        "checkpoint version {} not supported",
+                        cp.version
+                    )))
+                }
+            }
         }
-        Ok(cp)
     }
 
     /// Load one checkpoint by scan id.
@@ -195,6 +289,33 @@ impl CheckpointStore {
             .map_err(|e| CoreError::Plugin(format!("delete checkpoint: {e}")))?;
         Ok(())
     }
+}
+
+/// Write one length-prefixed postcard frame.
+fn write_frame<W: Write, T: Serialize>(w: &mut W, value: &T) -> std::io::Result<()> {
+    let bytes = postcard::to_allocvec(value).map_err(std::io::Error::other)?;
+    let len = u32::try_from(bytes.len())
+        .map_err(|_| std::io::Error::other("checkpoint frame exceeds u32 length"))?;
+    w.write_all(&len.to_le_bytes())?;
+    w.write_all(&bytes)
+}
+
+/// Read one length-prefixed postcard frame; returns the value and the
+/// total bytes consumed (header + payload).
+fn read_frame<T: for<'de> Deserialize<'de>>(buf: &[u8]) -> Result<(T, usize), String> {
+    if buf.len() < 4 {
+        return Err("truncated frame header".into());
+    }
+    let len = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    let end = 4 + len;
+    if buf.len() < end {
+        return Err(format!(
+            "truncated frame body (need {end}, have {})",
+            buf.len()
+        ));
+    }
+    let value = postcard::from_bytes(&buf[4..end]).map_err(|e| e.to_string())?;
+    Ok((value, end))
 }
 
 /// Compute the 5-point sampled fingerprint of a source.
@@ -467,8 +588,96 @@ mod tests {
             state: ScanState::Done,
             entries: vec![],
         };
-        store.write(&cp).unwrap();
+        // Serialize the (bogus-version) monolithic v1-shaped blob by hand
+        // and place it where load() expects it.
+        let bytes = postcard::to_stdvec(&cp).unwrap();
+        let path = store.path_for(cp.scan_id);
+        std::fs::create_dir_all(&store.dir).unwrap();
+        std::fs::write(&path, bytes).unwrap();
         let err = store.load(cp.scan_id).unwrap_err();
         assert!(err.to_string().contains("version"), "{err}");
+    }
+    #[test]
+    fn v1_legacy_monolithic_checkpoint_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(dir.path().to_path_buf());
+        let cp = ScanCheckpoint {
+            version: 1,
+            scan_id: Uuid::new_v4(),
+            created_at: OffsetDateTime::now_utc(),
+            source_uri: "legacy".into(),
+            source_size: 16,
+            source_fingerprint: [7; 32],
+            config: ScanConfig {
+                source_uri: "legacy".into(),
+                mode: crate::plugin::ScanMode::Quick,
+                max_results: 1,
+                include_carving: false,
+                file_filter: vec![],
+            },
+            state: ScanState::Done,
+            entries: vec![],
+        };
+        // v1 files are one monolithic postcard blob.
+        let bytes = postcard::to_stdvec(&cp).unwrap();
+        let path = store.path_for(cp.scan_id);
+        std::fs::create_dir_all(&store.dir).unwrap();
+        std::fs::write(&path, bytes).unwrap();
+        let loaded = store.load(cp.scan_id).unwrap();
+        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.source_uri, "legacy");
+    }
+
+    #[test]
+    fn streamed_save_loads_across_many_pages() {
+        // More entries than SAVE_PAGE: the v2 writer must paginate and
+        // the loader must rebuild every one.
+        let dir = tempfile::tempdir().unwrap();
+        let store = CheckpointStore::new(dir.path().to_path_buf());
+        let src = MemSource {
+            data: sample_source(),
+        };
+        let config = ScanConfig {
+            source_uri: "many".into(),
+            mode: crate::plugin::ScanMode::Deep,
+            max_results: 1_000_000,
+            include_carving: true,
+            file_filter: vec![],
+        };
+        let handle = ScanHandle::new(config);
+        let results = handle.results();
+        let total = SAVE_PAGE * 2 + 137; // three pages, ragged last page
+        for i in 0..total {
+            results.insert(RecoveredEntry {
+                id: crate::RecoveredEntryId(Uuid::new_v4()),
+                fs_kind: "test".into(),
+                parent_path: format!("/d{}", i % 7),
+                name: format!("f{i}.bin"),
+                size: i as u64,
+                start_lba: Some(i as u64),
+                mtime: None,
+                ctime: None,
+                atime: None,
+                status: crate::RecoveryStatus::Intact,
+                extension: "bin".into(),
+                mime: None,
+                confidence: 1000,
+                was_deleted: false,
+                cluster_chain: vec![],
+                extents: vec![],
+                resident_data: None,
+            });
+        }
+        store.save(&handle, "many", &src).unwrap();
+        let loaded = store.load(handle.id()).unwrap();
+        assert_eq!(loaded.entries.len(), total);
+        assert_eq!(loaded.version, CHECKPOINT_VERSION);
+        // Spot-check first and last.
+        assert_eq!(loaded.entries[0].name, "f0.bin");
+        assert_eq!(
+            loaded.entries[total - 1].name,
+            format!("f{}.bin", total - 1)
+        );
+        assert_eq!(loaded.entries[total - 1].size, (total - 1) as u64);
     }
 }

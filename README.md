@@ -6,9 +6,36 @@ State-of-the-art data recovery wizard for Windows, built from scratch in **Rust 
 
 ## Project status
 
-🚧 **Active reverse-engineering + initial scaffold phase.**
+🚧 **Core engines working and tested; app wiring complete.** See the support matrix below for exactly what works today.
 
 See [`worklog.md`](./worklog.md) for the running work log and [`docs/`](./docs/) for the full reverse-engineering documentation.
+
+### Filesystem support matrix (honest, as of 2026-10)
+
+| Filesystem | Quick scan | Deep scan (unallocated carving) | Status |
+|---|---|---|---|
+| NTFS 3.x | MFT walk, timestamps, resident data, extents | $Bitmap-guided carve | **Working, tested** |
+| FAT12/16/32 | dir walk, FAT timestamps, extents | free-run carve | **Working, tested** |
+| exFAT | entry-set walk, timestamps, fragmentation | allocation-bitmap carve | **Working, tested** |
+| HFS+ | catalog B-tree walk, extents | free-block carve | **Working, tested** |
+| ext2/3/4 | - | - | Stub (probe says no; planned) |
+| Btrfs | - | - | Stub (probe says no; planned) |
+| ReFS | - | - | Stub (probe says no; planned) |
+| ZFS | - | - | Stub (probe says no; planned) |
+| Unknown/blank | - | raw carve fallback (258 signatures, tiered validation) | **Working, tested** |
+
+Stub engines are registered so their absence is visible, but they never
+claim a source (`ProbeOutcome::No`); the UI never presents them as
+supported. Real engines land one at a time, each validated against
+fixtures and real volumes before the matrix changes.
+
+### Safety properties
+
+- Strict positional reads: short reads are typed errors, never zero-filled success
+- Recovery writes: temp + fsync + atomic publish, no-clobber by default, collision policies, free-space preflight, source-not-destination guard
+- Bounded results: memory-bounded store with disk spill, paged access, streaming checkpoints
+- Carving: bounded worker pool, chunk-overlap so boundary-straddling headers are found exactly once, cooperative cancellation
+- Capabilities: dialog/log/window-state only (no fs/shell/process plugin surface)
 
 ## Goals
 
