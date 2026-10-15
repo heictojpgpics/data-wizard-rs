@@ -8,7 +8,6 @@ import type {
   RecoveredFile,
   ScanStatsDto,
 } from "../bindings";
-import { AgeMap } from "../components/AgeMap";
 import { RecoveryPanel } from "../components/RecoveryPanel";
 import { StatsOverview } from "../components/StatsOverview";
 import {
@@ -204,8 +203,6 @@ export function ResultsView({ scanId, onBack }: Props) {
         activeCategory={activeCategory}
         onCategory={setActiveCategory}
       />
-
-      <AgeMap stats={stats} />
 
       {showRecovery && selected.size > 0 && (
         <RecoveryPanel

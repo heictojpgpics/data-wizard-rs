@@ -87,15 +87,6 @@ pub struct ScanProgress {
     pub message: String,
 }
 
-/// One bucket of the age map: bytes attributed to a "YYYY-MM" month.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub struct AgeBucketDto {
-    /// "YYYY-MM" (UTC-normalized FS-native mtime).
-    pub month: String,
-    pub files: u64,
-    pub bytes: u64,
-}
-
 /// One category row ("Photos", "Videos", ...).
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CategoryCountDto {
@@ -113,8 +104,7 @@ pub struct StatusCountDto {
     pub bytes: u64,
 }
 
-/// Aggregated statistics for a scan (drives the results overview and
-/// the bytes-by-month age map).
+/// Aggregated statistics for a scan (drives the results overview).
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct ScanStatsDto {
     pub scan_id: String,
@@ -122,8 +112,6 @@ pub struct ScanStatsDto {
     pub total_bytes: u64,
     pub by_status: Vec<StatusCountDto>,
     pub by_category: Vec<CategoryCountDto>,
-    pub by_month: Vec<AgeBucketDto>,
-    pub no_timestamp_files: u64,
 }
 
 /// Per-file outcome of a recovery batch.

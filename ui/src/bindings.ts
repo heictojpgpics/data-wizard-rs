@@ -81,12 +81,6 @@ export interface ListResultsResponse {
   items: RecoveredFile[];
 }
 
-export interface AgeBucketDto {
-  month: string;
-  files: number;
-  bytes: number;
-}
-
 export interface CategoryCountDto {
   category: string;
   label: string;
@@ -106,8 +100,6 @@ export interface ScanStatsDto {
   total_bytes: number;
   by_status: StatusCountDto[];
   by_category: CategoryCountDto[];
-  by_month: AgeBucketDto[];
-  no_timestamp_files: number;
 }
 
 export interface FileRecoveryOutcome {

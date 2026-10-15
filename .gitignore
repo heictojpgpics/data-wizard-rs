@@ -59,3 +59,6 @@ crates/*/fuzz/target/
 crates/*/fuzz/corpus/
 crates/*/fuzz/artifacts/
 skills/
+
+# TypeScript incremental build state
+*.tsbuildinfo

@@ -409,16 +409,6 @@ pub async fn scan_stats(
                     bytes,
                 })
                 .collect(),
-            by_month: stats
-                .by_month
-                .into_iter()
-                .map(|(month, files, bytes)| dto::AgeBucketDto {
-                    month,
-                    files,
-                    bytes,
-                })
-                .collect(),
-            no_timestamp_files: stats.no_timestamp_files,
         },
     })
 }
