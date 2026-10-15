@@ -376,6 +376,7 @@ fn find_pattern(buf: &[u8], pattern: &[Option<u8>]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::panic, clippy::expect_used, clippy::unwrap_used)]
     use super::*;
     use dw_disk::{DiskSource, FileBackedSource};
 

@@ -262,6 +262,7 @@ fn analyse_zip(buf: &[u8]) -> AnalyserOutcome {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::panic, clippy::expect_used, clippy::unwrap_used)]
     use super::*;
 
     // ---- JPEG ----
