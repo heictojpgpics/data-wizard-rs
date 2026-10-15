@@ -43,7 +43,7 @@ pub mod namespace {
 }
 
 /// Parsed `$FILE_NAME` attribute content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileName {
     /// Parent directory MFT record number (low 48 bits of the 64-bit
     /// parent reference).

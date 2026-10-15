@@ -98,6 +98,13 @@ impl FsPlugin for NtfsPlugin {
         let entries = outcome.entries;
         info!(entries, "NTFS MFT walk complete");
 
+        // Deep pass 1: names from surviving $I30 indexes for records the
+        // MFT pass could not surface.
+        if mode == ScanMode::Deep {
+            let found = crate::walker::index_pass(&source, &results, &outcome, &cancel).await;
+            info!(found, "NTFS $I30 index pass complete");
+        }
+
         // Deep scan: carve the UNALLOCATED clusters only, guided by
         // $Bitmap (MFT record 6). Falls back to whole-volume carving when
         // the bitmap is unavailable (corrupt MFT / missing record 6).
