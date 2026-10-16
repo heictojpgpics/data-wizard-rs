@@ -74,7 +74,7 @@ pub fn decompress(algo: u8, raw: &[u8], lsize: u64, off: u64) -> ZfsResult<Vec<u
         }
         c::ZSTD => {
             let mut out = Vec::with_capacity(lsize as usize);
-            ruzstd::StreamingDecoder::new(std::io::Cursor::new(raw))
+            ruzstd::decoding::StreamingDecoder::new(std::io::Cursor::new(raw))
                 .map_err(|_| ZfsError::DecompressFailed { off, algo: "zstd" })?
                 .read_to_end(&mut out)
                 .map_err(|_| ZfsError::DecompressFailed { off, algo: "zstd" })?;

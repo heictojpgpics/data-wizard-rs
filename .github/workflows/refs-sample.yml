@@ -91,7 +91,20 @@ jobs:
               Write-Host "vhd still held (attempt $i): $($_.Exception.Message)"
             }
           }
-          if (-not $ok) { throw "vhd still attached after 30s" }
+          if (-not $ok) {
+            # The runner's own cleanup terminates vdsldr to release the
+            # handle; do the same here now that detach is confirmed.
+            Write-Host "terminating vdsldr to release the handle"
+            Get-Process vdsldr -ErrorAction SilentlyContinue | Stop-Process -Force
+            Start-Sleep -Seconds 3
+            try {
+              $fs = [IO.File]::Open($vhd, 'Open', 'Read', 'None')
+              $fs.Close()
+              $ok = $true
+            } catch [IO.IOException] {
+              throw "vhd still attached after vdsldr termination: $($_.Exception.Message)"
+            }
+          }
           $info = Get-Item $vhd
           Write-Host "VHD: $($info.FullName) $([math]::Round($info.Length / 1MB, 2)) MiB"
           Compress-Archive -Path $vhd -DestinationPath refs-sample.zip
