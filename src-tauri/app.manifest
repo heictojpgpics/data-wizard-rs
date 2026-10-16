@@ -15,7 +15,7 @@
   <!-- The Common-Controls v6 side-by-side dependency from the
        tauri-build default manifest MUST survive a custom manifest: the
        app statically imports v6-only comctl32 exports
-       (TaskDialogIndirect, SetWindowSubclass, ...) — without this
+       (TaskDialogIndirect, SetWindowSubclass, ...) -- without this
        dependency the loader resolves comctl32 to the base v5 DLL and
        the process dies at init with STATUS_ENTRYPOINT_NOT_FOUND
        (0xC0000139), no stdout, no stderr, both GUI and --diagnostics. -->

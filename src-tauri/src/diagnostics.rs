@@ -88,11 +88,7 @@ pub fn run() -> i32 {
         eprintln!("diagnostics: no disks enumerated");
         return 1;
     }
-    if report
-        .disks
-        .iter()
-        .all(|d| d.size_bytes == 0)
-    {
+    if report.disks.iter().all(|d| d.size_bytes == 0) {
         eprintln!("diagnostics: every disk reports a zero size");
         return 1;
     }

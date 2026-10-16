@@ -1168,3 +1168,28 @@ Work Log:
 Stage Summary:
 - The elevation feature survives; the crash class is documented;
   awaiting the runners to confirm the full pipeline green.
+
+---
+Task ID: 7 (session 8, follow-up 4)
+Agent: main (Super Z)
+Task: The official tauri #13419 manifest workaround (linker embedding)
+
+Work Log:
+- The Common-Controls fix changed the failure mode: 0xC0000139 became
+  SxS 14001 ("side-by-side configuration is incorrect") on every launch
+  — the resource-compiler embedding of a CUSTOM app_manifest is itself
+  broken (tauri issue #13419).
+- DiskGenie's build.rs documents the exact same journey AND the
+  official workaround: WindowsAttributes::new_without_app_manifest() +
+  linker /MANIFEST:EMBED + /MANIFESTINPUT (covers cargo test binaries
+  too, which the resource form never reaches). Adopted verbatim for our
+  app.manifest (requireAdministrator + Common-Controls v6 +
+  compatibility + UTF-8 codepage); the manifest comments are now
+  ASCII-only (SxS parser hygiene).
+- Also formatted the upstream src-tauri additions the rebase brought in
+  (src-tauri is its own fmt workspace — the root `cargo fmt --all`
+  never covered it; the CI fmt gate caught it).
+
+Stage Summary:
+- Elevation + Common-Controls via the proven linker channel; awaiting
+  runner confirmation.

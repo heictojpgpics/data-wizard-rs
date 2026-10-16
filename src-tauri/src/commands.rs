@@ -212,7 +212,8 @@ pub async fn start_scan(
                         };
                         if let Ok(src) = open_source(&source_path) {
                             let size = dw_disk::ReadAt::size(src.as_read_at().as_ref());
-                            let db = std::sync::Arc::new(dw_signatures::SignatureDb::from_embedded());
+                            let db =
+                                std::sync::Arc::new(dw_signatures::SignatureDb::from_embedded());
                             let read_at = src.as_read_at();
                             warn!(scan_id = %scan_id, size, "Raw-carving fallback (unknown filesystem)");
                             carved_fallback = dw_carver::header_footer::carve_region_async(
@@ -856,8 +857,7 @@ pub async fn list_partitions(
             let volume = volumes.iter().find(|v| {
                 v.disk_number == drive_index
                     && v.extent_start.is_some_and(|s| s >= e.offset_bytes)
-                    && v
-                        .extent_start
+                    && v.extent_start
                         .zip(v.extent_len)
                         .is_some_and(|(s, l)| s.saturating_add(l) <= part_end)
             });
@@ -878,7 +878,8 @@ pub async fn list_partitions(
             }
         };
         #[cfg(not(windows))]
-        let (drive_letter, free_bytes, label, part_is_windows) = (None, None, e.label.clone(), false);
+        let (drive_letter, free_bytes, label, part_is_windows) =
+            (None, None, e.label.clone(), false);
 
         partitions.push(dto::PartitionInfo {
             index: e.index,
@@ -942,7 +943,7 @@ fn bus_type_of(bus: dw_disk::StorageBus) -> dto::BusType {
 
 #[cfg(windows)]
 fn enumerate_disks_windows() -> Vec<dto::DiskInfo> {
-    use dw_disk::{enumerate_physical_drives, enumerate_volumes, PartitionEntry};
+    use dw_disk::{PartitionEntry, enumerate_physical_drives, enumerate_volumes};
 
     let drives = enumerate_physical_drives();
     let volumes = enumerate_volumes();
@@ -959,20 +960,19 @@ fn enumerate_disks_windows() -> Vec<dto::DiskInfo> {
         // Partition discovery needs read access to the raw device. A
         // refusal (rare with the elevation manifest; possible for some
         // virtual controllers) still yields a size-correct entry.
-        let entries: Vec<PartitionEntry> = dw_disk::windows_raw::WindowsRawSource::open(
-            std::path::Path::new(&drive.path),
-        )
-        .ok()
-        .and_then(|src| {
-            let read_at = src.as_read_at();
-            dw_disk::discover_partitions(read_at.as_ref()).ok()
-        })
-        .map(|table| match table {
-            dw_disk::DiscoveredTable::Gpt { entries, .. } => entries,
-            dw_disk::DiscoveredTable::Mbr { entries } => entries,
-            dw_disk::DiscoveredTable::None => Vec::new(),
-        })
-        .unwrap_or_default();
+        let entries: Vec<PartitionEntry> =
+            dw_disk::windows_raw::WindowsRawSource::open(std::path::Path::new(&drive.path))
+                .ok()
+                .and_then(|src| {
+                    let read_at = src.as_read_at();
+                    dw_disk::discover_partitions(read_at.as_ref()).ok()
+                })
+                .map(|table| match table {
+                    dw_disk::DiscoveredTable::Gpt { entries, .. } => entries,
+                    dw_disk::DiscoveredTable::Mbr { entries } => entries,
+                    dw_disk::DiscoveredTable::None => Vec::new(),
+                })
+                .unwrap_or_default();
 
         let mut partitions = Vec::with_capacity(entries.len());
         let mut disk_free: u64 = 0;
@@ -990,8 +990,7 @@ fn enumerate_disks_windows() -> Vec<dto::DiskInfo> {
             let volume = volumes.iter().find(|v| {
                 v.disk_number == Some(drive.index)
                     && v.extent_start.is_some_and(|s| s >= e.offset_bytes)
-                    && v
-                        .extent_start
+                    && v.extent_start
                         .zip(v.extent_len)
                         .is_some_and(|(s, l)| s.saturating_add(l) <= part_end)
             });
@@ -1053,7 +1052,10 @@ fn enumerate_disks_windows() -> Vec<dto::DiskInfo> {
     // could not open): standalone entries so the user always sees every
     // letter Explorer shows.
     for v in &volumes {
-        if mapped_letters.iter().any(|m| m.eq_ignore_ascii_case(&v.letter)) {
+        if mapped_letters
+            .iter()
+            .any(|m| m.eq_ignore_ascii_case(&v.letter))
+        {
             continue;
         }
         // Authoritative size: filesystem totals when mounted, else the
@@ -1071,7 +1073,10 @@ fn enumerate_disks_windows() -> Vec<dto::DiskInfo> {
             continue; // no media / nothing to scan
         }
         let letter = format!("{}:", v.letter);
-        let removable = matches!(v.kind, dw_disk::VolumeKind::Removable | dw_disk::VolumeKind::CdRom);
+        let removable = matches!(
+            v.kind,
+            dw_disk::VolumeKind::Removable | dw_disk::VolumeKind::CdRom
+        );
         let display_name = match (&v.label, v.kind) {
             (Some(l), _) if !l.trim().is_empty() => format!("{l} ({letter})"),
             (None, dw_disk::VolumeKind::Removable) => format!("Removable Disk ({letter})"),
