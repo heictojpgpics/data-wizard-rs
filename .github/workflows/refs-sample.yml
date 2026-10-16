@@ -70,44 +70,54 @@ jobs:
           1..15 | ForEach-Object { Remove-Item "R:\TestFiles\file$_.txt" }
           Get-ChildItem -Recurse R:\ | Select-Object FullName, Length | Out-String | Write-Host
 
-      - name: Detach, compress and upload
+      - name: Dump the raw volume (no VHD file needed)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $vhd = "$env:TEMP\test_refs.vhd"
-          $det = "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart
-          $det | Out-String | Write-Host
-          if ($LASTEXITCODE -ne 0) { throw "detach failed: $LASTEXITCODE" }
-          # VDS releases the handle asynchronously; give it a moment.
-          $ok = $false
-          foreach ($i in 1..6) {
-            Start-Sleep -Seconds 5
-            try {
-              $fs = [IO.File]::Open($vhd, 'Open', 'Read', 'None')
-              $fs.Close()
-              $ok = $true
-              break
-            } catch [IO.IOException] {
-              Write-Host "vhd still held (attempt $i): $($_.Exception.Message)"
-            }
+          # The VHD file handle is pinned by the stack long after detach
+          # (survives vdsldr termination), so the artifact is a raw dump
+          # of the attached volume itself: \.\R: first 128 MiB plus the
+          # last 2 MiB, with a manifest carrying the volume length.
+          $vol = New-Object IO.FileStream("\\.\R:", 'Open', 'Read', [IO.FileShare]::ReadWrite)
+          $len = $vol.Length
+          $head = 128MB
+          $tail = 2MB
+          $buf = New-Object byte[] (4MB)
+
+          $out = New-Object IO.FileStream("$env:TEMP\refs-head.bin", 'Create', 'Write')
+          $pos = 0L
+          while ($pos -lt $head) {
+            $take = [Math]::Min($buf.Length, $head - $pos)
+            $vol.Position = $pos
+            $n = $vol.Read($buf, 0, $take)
+            if ($n -le 0) { throw "short read at $pos" }
+            $out.Write($buf, 0, $n)
+            $pos += $n
           }
-          if (-not $ok) {
-            # The runner's own cleanup terminates vdsldr to release the
-            # handle; do the same here now that detach is confirmed.
-            Write-Host "terminating vdsldr to release the handle"
-            Get-Process vdsldr -ErrorAction SilentlyContinue | Stop-Process -Force
-            Start-Sleep -Seconds 3
-            try {
-              $fs = [IO.File]::Open($vhd, 'Open', 'Read', 'None')
-              $fs.Close()
-              $ok = $true
-            } catch [IO.IOException] {
-              throw "vhd still attached after vdsldr termination: $($_.Exception.Message)"
-            }
+          $out.Close()
+
+          $out = New-Object IO.FileStream("$env:TEMP\refs-tail.bin", 'Create', 'Write')
+          $pos = [Math]::Max(0L, $len - $tail)
+          while ($pos -lt $len) {
+            $take = [Math]::Min($buf.Length, $len - $pos)
+            $vol.Position = $pos
+            $n = $vol.Read($buf, 0, $take)
+            if ($n -le 0) { throw "short read at $pos" }
+            $out.Write($buf, 0, $n)
+            $pos += $n
           }
-          $info = Get-Item $vhd
-          Write-Host "VHD: $($info.FullName) $([math]::Round($info.Length / 1MB, 2)) MiB"
-          Compress-Archive -Path $vhd -DestinationPath refs-sample.zip
+          $out.Close()
+          $vol.Close()
+
+          @{ volume_bytes = $len; head_bytes = $head; tail_bytes = $tail } |
+            ConvertTo-Json | Set-Content "$env:TEMP\refs-manifest.json"
+          Get-Item "$env:TEMP\refs-*.bin" | Select-Object Name, Length | Out-String | Write-Host
+
+      - name: Compress and upload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Compress-Archive -Path "$env:TEMP\refs-head.bin", "$env:TEMP\refs-tail.bin", "$env:TEMP\refs-manifest.json" -DestinationPath refs-sample.zip
           $sum = (Get-FileHash refs-sample.zip -Algorithm SHA256).Hash
           "sha256 refs-sample.zip = $sum" | Write-Host
 
