@@ -1,0 +1,459 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Scanning — the centered scan card: header, orb, phase timeline,
+ * progress + counters, the live found feed, and terminal panels.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.dw-scan-page {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  padding: 32px 24px 48px;
+}
+
+.dw-scan-card {
+  width: min(680px, 100%);
+  height: fit-content;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-2);
+  padding: 26px 28px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+.dw-scan-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dw-scan-source {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dw-scan-source-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-tertiary);
+}
+
+.dw-scan-source-name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-scan-source-detail {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-scan-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.dw-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: var(--ink-soft);
+  color: var(--ink);
+}
+.dw-mode-badge.dw-deep {
+  background: color-mix(in srgb, var(--st-carved) 14%, transparent);
+  color: var(--st-carved);
+}
+
+.dw-readonly-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--free);
+}
+
+/* ── Orb zone ─────────────────────────────────────────────────────────── */
+.dw-scan-orb-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 2px;
+}
+
+.dw-scan-orb {
+  position: relative;
+  width: 74px;
+  height: 74px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  background: var(--ink-grad);
+  color: var(--on-ink);
+  box-shadow: var(--ink-glow-strong);
+}
+.dw-scan-orb.dw-done {
+  background: var(--free);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--free) 36%, transparent);
+}
+.dw-scan-orb.dw-failed {
+  background: var(--used);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--used) 36%, transparent);
+}
+
+.dw-scan-orb-ring {
+  position: absolute;
+  inset: -8px;
+  border-radius: 28px;
+  border: 2px solid var(--ink);
+  animation: dw-pulse-ring 1.9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.dw-scan-orb-spin {
+  animation: dw-spin 1.6s linear infinite;
+}
+
+.dw-scan-status-line {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  text-align: center;
+}
+
+.dw-scan-status {
+  font-size: 13px;
+  font-weight: 650;
+}
+.dw-scan-status.dw-live {
+  color: var(--text);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.dw-scan-status.dw-ok {
+  color: var(--free);
+}
+.dw-scan-status.dw-err {
+  color: var(--used);
+}
+.dw-scan-status.dw-muted {
+  color: var(--text-secondary);
+}
+
+.dw-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 0 var(--ink-soft);
+  animation: dw-blink 1.4s ease-in-out infinite;
+}
+@keyframes dw-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.dw-scan-message {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  max-width: 52ch;
+}
+.dw-scan-message.dw-err {
+  color: var(--used);
+}
+
+/* ── Phase timeline ───────────────────────────────────────────────────── */
+.dw-timeline {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  margin: 0;
+}
+
+.dw-tl-step {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.dw-tl-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--card);
+  flex: none;
+  transition: background var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.dw-tl-label {
+  margin-left: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.dw-tl-bar {
+  flex: 1;
+  height: 2px;
+  margin: 0 10px;
+  border-radius: 1px;
+  background: var(--track);
+  min-width: 12px;
+}
+
+.dw-tl-step.dw-done .dw-tl-dot {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.dw-tl-step.dw-done .dw-tl-label {
+  color: var(--text-secondary);
+}
+.dw-tl-step.dw-done .dw-tl-bar {
+  background: color-mix(in srgb, var(--ink) 45%, var(--track));
+}
+
+.dw-tl-step.dw-active .dw-tl-dot {
+  background: var(--ink-grad);
+  border-color: transparent;
+  box-shadow: 0 0 0 4px var(--ink-soft);
+}
+.dw-tl-step.dw-active .dw-tl-label {
+  color: var(--ink);
+}
+
+.dw-timeline.dw-muted .dw-tl-step.dw-active .dw-tl-dot {
+  background: var(--text-tertiary);
+  box-shadow: none;
+}
+
+/* ── Progress + counters ──────────────────────────────────────────────── */
+.dw-track.dw-lg {
+  height: 8px;
+}
+
+.dw-scan-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dw-scan-progress-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dw-scan-progress-pct {
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.dw-scan-progress-rate,
+.dw-scan-progress-elapsed {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.dw-scan-counters {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.dw-scan-counter {
+  flex: 1;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--divider);
+  background: var(--panel);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dw-scan-counter.dw-quiet {
+  flex: 1.6;
+  justify-content: center;
+}
+
+.dw-scan-counter-num {
+  font-size: 20px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.dw-scan-counter.dw-quiet .dw-scan-counter-num {
+  color: var(--ink);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.dw-scan-counter-label {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* ── Live feed ────────────────────────────────────────────────────────── */
+.dw-scan-feed {
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-m);
+  background: var(--panel);
+  padding: 6px 10px;
+  min-height: 132px;
+  max-height: 208px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dw-scan-feed-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 6px;
+}
+.dw-feed-skel {
+  height: 18px;
+}
+
+.dw-feed-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 26px;
+  padding: 0 4px;
+  animation: dw-row-in var(--dur-base) var(--ease-out);
+  font-size: 12px;
+}
+
+.dw-feed-glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.dw-feed-name {
+  color: var(--text);
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: none;
+  max-width: 38%;
+}
+
+.dw-feed-path {
+  flex: 1;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.dw-feed-size {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* ── Actions ──────────────────────────────────────────────────────────── */
+.dw-scan-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dw-scan-cancel-note {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+/* ── Terminal summary panels ──────────────────────────────────────────── */
+.dw-scan-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-radius: var(--radius-m);
+  border: 1px solid color-mix(in srgb, var(--free) 30%, transparent);
+  background: var(--free-soft);
+  padding: 14px 16px;
+}
+
+.dw-scan-summary.dw-muted-panel {
+  border-color: color-mix(in srgb, var(--st-partial) 34%, transparent);
+  background: color-mix(in srgb, var(--st-partial) 9%, transparent);
+}
+
+.dw-scan-summary-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-m);
+  display: grid;
+  place-items: center;
+  background: var(--free);
+  color: #fff;
+  flex: none;
+}
+.dw-scan-summary-icon.dw-warn {
+  background: var(--st-partial);
+}
+
+.dw-scan-summary-body {
+  flex: 1;
+  min-width: 0;
+}
+.dw-scan-summary-body h3 {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+.dw-scan-summary-body p {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  line-height: 1.45;
+}

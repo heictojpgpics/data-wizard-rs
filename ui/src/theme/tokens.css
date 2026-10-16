@@ -1,0 +1,369 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Data Wizard design tokens — one source of truth for every color, shape
+ * and metric in the app.
+ *
+ * The TWO-LAYER theme system (same architecture as DiskGenie):
+ *   :root                      the LIGHT default palette (recovery teal ink).
+ *   [data-scheme="dark"]       the DARK-FAMILY layer (dark): control
+ *                              affordances, vivid category family, skeleton/
+ *                              shimmer, elevation, color-scheme.
+ *   [data-theme="dark"]        neutral graphite + teal.
+ *   [data-theme="ember"]       warm espresso + honey gold.
+ *   [data-theme="tide"]        deep marine + lagoon cyan.
+ *   [data-theme="blossom"]     blush cream + rose (light family).
+ *
+ * Identity: the ink is RECOVERY TEAL on light/dark — teal reads as safety,
+ * health and restoration, the emotional register a data-recovery tool wants.
+ * The custom palettes (ember/tide/blossom) keep their proven DiskGenie
+ * hues. Category pastels are theme-independent data colors; text on pastel
+ * fills is locked to --on-pastel / --on-pastel-secondary.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Surfaces (light) ─────────────────────────────────────────────── */
+  --background: #f6f8f7;
+  --panel: #eef1f0;
+  --card: #ffffff;
+  --border: #d8dedb;
+  --divider: #e6eae8;
+  --chip: #edf1ef;
+  --track: #e2e8e5;
+  --overlay: rgba(23, 32, 29, 0.16);
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text: #17201d;
+  --text-secondary: #5c6b66;
+  --text-tertiary: #82908a;
+  --on-pastel: #0f172a;
+  --on-pastel-secondary: #334155;
+
+  /* Control affordance (outline buttons, chips, pickers). */
+  --on-control: #5c6b66;
+  --control-border: #cfd6d2;
+  --control-hover: #edf1ef;
+  --control-active: #e4e9e7;
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #0d9488;
+  --ink-strong: #0f766e;
+  --on-ink: #ffffff;
+  --ink-soft: rgba(13, 148, 136, 0.11);
+  /* Primary CTA: subtle top-light teal gradient + a soft glow shadow. */
+  --ink-grad: linear-gradient(180deg, #17b3a2 0%, #0d9488 55%, #0b7d74 100%);
+  --ink-glow: 0 2px 8px rgba(13, 148, 136, 0.30), 0 1px 2px rgba(11, 125, 116, 0.18);
+  --ink-glow-strong: 0 4px 14px rgba(13, 148, 136, 0.40), 0 1px 3px rgba(11, 125, 116, 0.20);
+  --used: #ff3b30;
+  --used-soft: rgba(255, 59, 48, 0.1);
+  --used-tint: rgba(255, 59, 48, 0.055);
+  --free: #34c759;
+  --free-soft: rgba(52, 199, 89, 0.12);
+  --focus-ring: rgba(13, 148, 136, 0.8);
+  --close-hover: #e81123;
+
+  /* ── Category data colors (light pastels; theme-independent) ──────── */
+  --cat-photos: #7dd3fc;
+  --cat-videos: #fda4af;
+  --cat-audio: #c4b5fd;
+  --cat-documents: #fcd34d;
+  --cat-archives: #fdba74;
+  --cat-email: #86efac;
+  --cat-code: #5eead4;
+  --cat-other: #cbd5e1;
+
+  /* ── Recovery status colors (semantic; dark family lifts them) ────── */
+  --st-intact: #16a34a;
+  --st-validated: #0d9488;
+  --st-carved: #3b82f6;
+  --st-partial: #d97706;
+  --st-overwritten: #dc2626;
+  --st-pending: #82908a;
+
+  /* ── Shape & motion ───────────────────────────────────────────────── */
+  --radius-xs: 6px;
+  --radius-s: 8px;
+  --radius-m: 10px;
+  --radius-l: 12px;
+  --radius-xl: 14px;
+  --press-scale: 0.985;
+  --press-opacity: 0.75;
+  --spring: 250ms;
+  --fade: 160ms;
+
+  /* Motion ladder: durations on a 0.5x/0.75x/1x/1.5x/2x ladder anchored
+   * at the 160ms fade. Indeterminate loops share one rhythm family. */
+  --dur-micro: 120ms; /* menus, chips, hover swaps */
+  --dur-fast: 160ms; /* entrances, scrim */
+  --dur-base: 240ms; /* layout settles, progress bar */
+  --dur-slow: 360ms; /* large surfaces, inspector slide */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.5, 0.05, 0.4, 1);
+  --ease-overshoot: cubic-bezier(0.2, 0.9, 0.3, 1.15);
+
+  /* ── Spacing scale (4px base; 6/10/14 for dense rows) ─────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 56px;
+
+  /* ── Focus geometry ───────────────────────────────────────────────── */
+  --focus-w: 2px;
+  --focus-offset: 2px;
+
+  /* ── Status on-colors ─────────────────────────────────────────────── */
+  --on-used: #ffffff;
+  --on-free: #ffffff;
+  --on-close: #ffffff;
+
+  /* ── Loading system: skeleton + shimmer speak the surface language ── */
+  --skeleton: #e7ebe9;
+  --shimmer: rgba(255, 255, 255, 0.65);
+
+  /* ── State opacity ────────────────────────────────────────────────── */
+  --disabled-opacity: 0.5;
+
+  /* ── Elevation ────────────────────────────────────────────────────── */
+  --shadow-1: 0 1px 2px rgba(23, 32, 29, 0.06), 0 1px 3px rgba(23, 32, 29, 0.05);
+  --shadow-2: 0 4px 10px rgba(23, 32, 29, 0.08), 0 2px 4px rgba(23, 32, 29, 0.05);
+  --shadow-3: 0 12px 28px rgba(23, 32, 29, 0.14), 0 4px 8px rgba(23, 32, 29, 0.06);
+  /* Pop elevation: crisp 1px contact edge + mid + ambient. */
+  --shadow-pop: 0 1px 2px rgba(23, 32, 29, 0.12), 0 8px 20px rgba(23, 32, 29, 0.13), 0 16px 44px rgba(23, 32, 29, 0.17);
+  --card-sheen: linear-gradient(125deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0) 55%);
+
+  /* ── Typography ───────────────────────────────────────────────────── */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, "SF Mono", Menlo, monospace;
+
+  /* ── Layout metrics (locked) ──────────────────────────────────────── */
+  --top-bar-h: 56px;
+  --sidebar-w: 304px;
+  --inspector-w: 360px;
+  --status-h: 30px;
+  --caption-btn-w: 46px;
+  --caption-btn-h: 32px;
+  --sidebar-w-compact: 264px;
+  --inspector-w-compact: 316px;
+
+  /* Density ladder breakpoints (documentation-only: media queries cannot
+   * consume custom properties — queries hardcode these px values inline;
+   * they live here as the single named source the queries must match). */
+  --bp-compact: 1440px;
+  --bp-narrow: 1180px;
+
+  color-scheme: light;
+}
+
+/* ── The DARK-FAMILY layer (dark) ───────────────────────────────────
+ * Everything shared by the dark-family palette: brightened control
+ * affordances, the vivid category family, deeper elevation. */
+[data-scheme="dark"] {
+  --on-control: #e6ecea;
+  --control-border: #74807c;
+  --control-hover: rgba(255, 255, 255, 0.07);
+  --control-active: rgba(255, 255, 255, 0.11);
+
+  --skeleton: #262b29;
+  --shimmer: rgba(255, 255, 255, 0.07);
+
+  /* Category vivid family: the pastels above are light-mode material
+   * (L~0.90, C~0.03); on dark surfaces they collapse into a faint gray
+   * wash. Dark mode gets the same eight hues at L~0.62-0.68 with real
+   * chroma so category chips and icons stay clearly distinct. */
+  --cat-photos: #45aede;
+  --cat-videos: #e66a80;
+  --cat-audio: #9678e6;
+  --cat-documents: #dca43e;
+  --cat-archives: #e08547;
+  --cat-email: #61b857;
+  --cat-code: #3ec39a;
+  --cat-other: #8b95a3;
+
+  /* Recovery status colors lifted for dark surfaces. */
+  --st-intact: #34d399;
+  --st-validated: #2dd4bf;
+  --st-carved: #60a5fa;
+  --st-partial: #f5a623;
+  --st-overwritten: #f87171;
+  --st-pending: #9aa8a2;
+
+  /* Elevation (deeper in the dark family). */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 4px 10px rgba(0, 0, 0, 0.45);
+  --shadow-3: 0 12px 28px rgba(0, 0, 0, 0.6);
+  --shadow-pop: 0 1px 2px rgba(0, 0, 0, 0.55), 0 8px 20px rgba(0, 0, 0, 0.55), 0 16px 44px rgba(0, 0, 0, 0.7);
+  --card-sheen: linear-gradient(125deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 55%);
+
+  color-scheme: dark;
+}
+
+/* ── Dark (neutral graphite + recovery teal) ──────────────────────── */
+[data-theme="dark"] {
+  /* ── Surfaces ────────────────────────────────────────────────────── */
+  --background: #171b1a;
+  --panel: #1d2221;
+  --card: #212725;
+  --border: #3a4340;
+  --divider: #2a302e;
+  --chip: #272d2b;
+  --track: #2b322f;
+  --overlay: rgba(0, 0, 0, 0.5);
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text: #eef3f1;
+  --text-secondary: #a7b3ae;
+  --text-tertiary: #8b9791;
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #2dd4bf;
+  --ink-strong: #5eead4;
+  --on-ink: #05342e;
+  --ink-soft: rgba(45, 212, 191, 0.14);
+  --ink-grad: linear-gradient(180deg, #43e0cc 0%, #2dd4bf 55%, #1fb8a5 100%);
+  --ink-glow: 0 2px 8px rgba(45, 212, 191, 0.26), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --ink-glow-strong: 0 4px 14px rgba(45, 212, 191, 0.34), 0 1px 3px rgba(0, 0, 0, 0.22);
+  --used: #ff453a;
+  --used-soft: rgba(255, 69, 58, 0.14);
+  --used-tint: rgba(255, 69, 58, 0.08);
+  --free: #30d158;
+  --free-soft: rgba(48, 209, 88, 0.14);
+  --focus-ring: rgba(45, 212, 191, 0.6);
+}
+
+/* ── Ember (warm espresso + honey gold) ─────────────────────────────
+ * The candlelit-workshop palette: warm espresso surfaces with a
+ * honey-gold ink. Gold is a HIGH-luminance accent, so on-ink flips to
+ * deep espresso (dark-on-gold ~8:1 — the inverse of white-on-teal);
+ * every ink-filled control already speaks --on-ink, so the whole button
+ * vocabulary flips cleanly. */
+[data-theme="ember"] {
+  /* ── Surfaces ────────────────────────────────────────────────────── */
+  --background: #201a15;
+  --panel: #292119;
+  --card: #2e2620;
+  --border: #4a3d2e;
+  --divider: #382e23;
+  --chip: #362c21;
+  --track: #3a3026;
+  --overlay: rgba(12, 8, 4, 0.55);
+
+  /* ── Text (warm ivory ladder) ─────────────────────────────────────── */
+  --text: #f7f1e8;
+  --text-secondary: #b9a894;
+  --text-tertiary: #98897a;
+
+  /* Warm-tinted skeleton (the family neutral reads cold on espresso). */
+  --skeleton: #352a1f;
+  --shimmer: rgba(255, 240, 214, 0.06);
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #f2b04e;
+  --ink-strong: #ffc464;
+  --on-ink: #33230a;
+  --ink-soft: rgba(242, 176, 78, 0.16);
+  --ink-grad: linear-gradient(180deg, #ffd27a 0%, #f2b04e 55%, #d9902c 100%);
+  --ink-glow: 0 2px 8px rgba(242, 176, 78, 0.3), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --ink-glow-strong: 0 4px 14px rgba(242, 176, 78, 0.4), 0 1px 3px rgba(0, 0, 0, 0.28);
+  --used: #ff453a;
+  --used-soft: rgba(255, 69, 58, 0.14);
+  --used-tint: rgba(255, 69, 58, 0.08);
+  --free: #30d158;
+  --free-soft: rgba(48, 209, 88, 0.14);
+  --focus-ring: rgba(242, 176, 78, 0.65);
+
+  /* Ember status retune: validated moves out of the gold hue space. */
+  --st-validated: #6fc7b7;
+  --st-partial: #e8a13c;
+}
+
+/* ── Tide (deep marine + lagoon cyan) ───────────────────────────────
+ * The midnight-ocean palette: marine-blue surfaces with a lagoon cyan
+ * ink. Cyan is high-luminance, so on-ink is deep marine (the same
+ * dark-on-bright contrast solve as Ember's gold). */
+[data-theme="tide"] {
+  /* ── Surfaces ────────────────────────────────────────────────────── */
+  --background: #101722;
+  --panel: #18202e;
+  --card: #1c2534;
+  --border: #3c4a61;
+  --divider: #263040;
+  --chip: #223046;
+  --track: #263149;
+  --overlay: rgba(2, 6, 14, 0.55);
+
+  /* ── Text (cool white ladder) ─────────────────────────────────────── */
+  --text: #eef4fb;
+  --text-secondary: #a5b3c8;
+  --text-tertiary: #8393ab;
+
+  /* Cool-tinted skeleton (the family neutral reads warm on marine). */
+  --skeleton: #1f2837;
+  --shimmer: rgba(224, 242, 254, 0.06);
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #3fc5f2;
+  --ink-strong: #63d2f8;
+  --on-ink: #072431;
+  --ink-soft: rgba(63, 197, 242, 0.15);
+  --ink-grad: linear-gradient(180deg, #71d9fb 0%, #3fc5f2 55%, #1fa6d8 100%);
+  --ink-glow: 0 2px 8px rgba(63, 197, 242, 0.28), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --ink-glow-strong: 0 4px 14px rgba(63, 197, 242, 0.38), 0 1px 3px rgba(0, 0, 0, 0.28);
+  --used: #ff453a;
+  --used-soft: rgba(255, 69, 58, 0.14);
+  --used-tint: rgba(255, 69, 58, 0.08);
+  --free: #30d158;
+  --free-soft: rgba(48, 209, 88, 0.14);
+  --focus-ring: rgba(63, 197, 242, 0.6);
+
+  /* Tide status retune: carved-blue sits near the cyan ink — lift it. */
+  --st-carved: #8fb7f5;
+  --st-validated: #7ee6d8;
+}
+
+/* ── Blossom (blush cream + rose) ───────────────────────────────────
+ * The cherry-blossom-morning palette: warm blush surfaces, white cards
+ * that pop off them, and a rich rose ink. Rose is a mid-luminance
+ * accent — white on-ink keeps ~3.6:1. Light family: the pastel
+ * category colors, neutral skeletons and soft elevation all apply. */
+[data-theme="blossom"] {
+  /* ── Surfaces ────────────────────────────────────────────────────── */
+  --background: #fbf1ee;
+  --panel: #f6e9e5;
+  --card: #ffffff;
+  --border: #e5d0ca;
+  --divider: #eedcd7;
+  --chip: #f4e5e1;
+  --track: #eedcd8;
+  --overlay: rgba(90, 40, 35, 0.16);
+
+  /* ── Text (rosewood ladder) ───────────────────────────────────────── */
+  --text: #3b2428;
+  --text-secondary: #8a6568;
+  --text-tertiary: #a38083;
+
+  /* ── Brand & status ───────────────────────────────────────────────── */
+  --ink: #d2557a;
+  --ink-strong: #e06789;
+  --on-ink: #ffffff;
+  --ink-soft: rgba(210, 85, 122, 0.12);
+  --ink-grad: linear-gradient(180deg, #e06f92 0%, #d2557a 55%, #bc4468 100%);
+  --ink-glow: 0 2px 8px rgba(210, 85, 122, 0.3), 0 1px 2px rgba(188, 68, 104, 0.18);
+  --ink-glow-strong: 0 4px 14px rgba(210, 85, 122, 0.4), 0 1px 3px rgba(188, 68, 104, 0.2);
+  --used: #e0343b;
+  --used-soft: rgba(224, 52, 59, 0.1);
+  --used-tint: rgba(224, 52, 59, 0.06);
+  --free: #2fae66;
+  --free-soft: rgba(47, 174, 102, 0.13);
+  --focus-ring: rgba(210, 85, 122, 0.75);
+
+  /* Blossom status retune (light family, warmer neutrals). */
+  --st-intact: #199a58;
+  --st-validated: #0e8d80;
+  --st-carved: #3f74d6;
+  --st-partial: #c96f0a;
+  --st-overwritten: #c93a3a;
+  --st-pending: #a38083;
+}

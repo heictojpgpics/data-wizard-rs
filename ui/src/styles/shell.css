@@ -1,0 +1,324 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Shell — app grid, top bar (window drag region: brand, wizard step
+ * tracker, read-only chip, theme controls, GitHub link, Windows
+ * caption buttons), body columns, status strip.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.dw-app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--background);
+  color: var(--text);
+  font-size: 13px;
+  user-select: none;
+  overflow: hidden;
+}
+
+/* Text surfaces opt back in. */
+.dw-app input,
+.dw-app .dw-selectable-text {
+  user-select: text;
+}
+
+/* ── Top bar — doubles as the window title bar (drag region) ────────── */
+.dw-topbar {
+  height: var(--top-bar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--divider);
+  background: var(--background);
+  z-index: 5;
+}
+
+.dw-topbar-spacer {
+  flex: 1;
+}
+
+/* ── Brand ──────────────────────────────────────────────────────────── */
+.dw-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 8px 0 2px;
+  flex: none;
+  cursor: default;
+}
+.dw-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  border-radius: 9px;
+  background: var(--ink-grad);
+  color: var(--on-ink);
+  box-shadow: var(--ink-glow);
+  flex: none;
+}
+.dw-brand-mark svg {
+  /* The glyph reads best slightly larger inside the tinted tile. */
+  transform: scale(1.06);
+}
+.dw-brand-name {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* ── Wizard step tracker ─────────────────────────────────────────────── */
+.dw-steps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--chip);
+  flex: none;
+}
+
+.dw-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 12px 0 10px;
+  border-radius: 999px;
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: color var(--dur-fast) var(--ease-out),
+    background var(--dur-fast) var(--ease-out);
+}
+
+.dw-step-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  opacity: 0.55;
+  transition: background var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out);
+  flex: none;
+}
+
+/* The active step: ink pill with a soft glow (the CTA of the moment). */
+.dw-step.dw-active {
+  background: var(--ink-grad);
+  color: var(--on-ink);
+  box-shadow: var(--ink-glow);
+}
+.dw-step.dw-active .dw-step-dot {
+  background: var(--on-ink);
+  opacity: 0.95;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--on-ink) 22%, transparent);
+}
+
+/* Passed steps keep their dot tinted; upcoming stay muted. */
+.dw-step.dw-done {
+  color: var(--text-secondary);
+}
+.dw-step.dw-done .dw-step-dot {
+  background: var(--ink);
+  opacity: 0.8;
+}
+
+.dw-step-line {
+  width: 14px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--border);
+  margin: 0 3px 0 -2px;
+  flex: none;
+}
+
+/* ── Read-only chip ──────────────────────────────────────────────────── */
+.dw-readonly-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--free) 32%, transparent);
+  background: var(--free-soft);
+  color: color-mix(in srgb, var(--free) 78%, var(--text));
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: default;
+  flex: none;
+}
+
+/* ── Topbar controls ─────────────────────────────────────────────────── */
+.dw-topbar-iconbtn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--text-secondary);
+  transition: background var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out);
+  flex: none;
+}
+.dw-topbar-iconbtn:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+.dw-topbar-iconbtn:active {
+  opacity: var(--press-opacity);
+}
+
+.dw-topbar-link {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 4px 8px;
+  border-radius: var(--radius-xs);
+  flex: none;
+}
+.dw-topbar-link:hover {
+  color: var(--text);
+  background: var(--control-hover);
+  text-decoration: none;
+}
+
+/* ── Windows caption cluster (right end of the top bar) ─────────────── */
+.dw-caption {
+  flex: none;
+  display: flex;
+  align-self: stretch;
+  align-items: center;
+  margin: 0 -14px 0 2px; /* bleed to the window's top-right corner */
+}
+.dw-caption button {
+  width: var(--caption-btn-w);
+  height: var(--caption-btn-h);
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-xs);
+  transition: background var(--fade) ease, color var(--fade) ease;
+}
+.dw-caption button:hover {
+  background: var(--chip);
+  color: var(--text);
+}
+.dw-caption button:active {
+  opacity: 0.72;
+}
+.dw-caption button.dw-close:hover {
+  background: var(--close-hover);
+  color: #fff;
+}
+.dw-caption button.dw-close:active {
+  background: #c50f1f;
+  color: #fff;
+}
+
+/* ── Body columns: sidebar | main | inspector ────────────────────────── */
+.dw-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dw-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* The scrollable page inside the main column. */
+.dw-page {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* ── Status strip (bottom) ───────────────────────────────────────────── */
+.dw-statusbar {
+  height: var(--status-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  border-top: 1px solid var(--divider);
+  background: var(--background);
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  z-index: 4;
+}
+.dw-statusbar .dw-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.dw-statusbar .dw-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex: none;
+}
+.dw-statusbar .dw-status-dot.dw-live {
+  background: var(--ink);
+  box-shadow: 0 0 0 3px var(--ink-soft);
+}
+.dw-statusbar .dw-status-dot.dw-ok {
+  background: var(--free);
+}
+.dw-statusbar .dw-status-dot.dw-err {
+  background: var(--used);
+}
+.dw-statusbar .dw-status-spacer {
+  flex: 1;
+}
+
+/* ── Density ladder ─────────────────────────────────────────────────────
+ * compact: tighten sidebar + inspector so a 3-column layout breathes
+ * at ~1180-1440px. narrow (<= 1180px): inspector overlays instead of
+ * pushing columns (results table keeps its width). */
+@media (max-width: 1440px) {
+  .dw-body {
+    --sidebar-w: var(--sidebar-w-compact);
+    --inspector-w: var(--inspector-w-compact);
+  }
+}
+@media (max-width: 1180px) {
+  .dw-inspector {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 8;
+    box-shadow: var(--shadow-3);
+  }
+  .dw-readonly-chip .dw-readonly-label {
+    display: none;
+  }
+}
+
+/* ── Settle-in page animation target ────────────────────────────────── */
+.dw-tab-swap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: dw-settle-in var(--dur-slow) var(--ease-out);
+  background: var(--background);
+}

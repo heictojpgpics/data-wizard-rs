@@ -61,6 +61,7 @@ from.
 | [`formats/signatures-bin.md`](formats/signatures-bin.md) | Our `signatures.bin` v1 format |
 | [`ui-ux/flows.md`](ui-ux/flows.md) | User flows: select source -> scan -> review -> recover |
 | [`ui-ux/patterns.md`](ui-ux/patterns.md) | UI patterns (NOT pixel clones — terminology and information architecture only) |
+| [`ui-ux/design-system.md`](ui-ux/design-system.md) | The implemented design system: tokens, 5-theme architecture, motion family, layout grammar, the mock layer and CI screenshot tours |
 | [`security/findings.md`](security/findings.md) | Security posture of reference product (ASLR/CFG gaps) — things we will NOT replicate |
 | [`security/our-posture.md`](security/our-posture.md) | Our security posture: full ASLR/DEP/CFG, memory-safe core, no telemetry-by-default |
 | [`tech-stack/reference.md`](tech-stack/reference.md) | Reference product tech stack (observable from DLL presence) |

@@ -1,169 +1,114 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { DiskInfo } from "./bindings";
-import { ResultsView } from "./views/Results";
-import { ScanningView } from "./views/Scanning";
+/**
+ * Data Wizard app shell: 56px top bar (brand, wizard step tracker,
+ * window drag region, Windows caption buttons) → body (contextual
+ * sidebar | main | inspector on results) → 30px status strip. Hosts
+ * the three wizard stages, the recovery dialog, toasts, and the
+ * DATAWIZARD_TOUR driver (CI screenshot tours).
+ */
+import { useCallback, useEffect } from "react";
+import type { SavedScanSummary } from "./bindings";
+import { TopBar } from "./shell/TopBar";
+import { StatusBar, warmDisks } from "./shell/StatusBar";
+import { Sidebar } from "./sidebar/Sidebar";
 import { SelectSource } from "./views/SelectSource";
+import { ScanningView } from "./views/ScanningView";
+import { ResultsView } from "./views/ResultsView";
+import { FileInspector } from "./inspector/FileInspector";
+import { RecoveryDialog } from "./components/RecoveryDialog";
+import { Toasts } from "./components/Toasts";
+import { TourDriver } from "./shell/TourDriver";
+import { useAppStore, type ChosenSource } from "./state/app";
+import { useScanStore } from "./state/scan";
+import { invoke } from "./lib/ipc";
 
-type View = "select" | "scanning" | "results";
+import "./theme/tokens.css";
+import "./styles/base.css";
+import "./styles/shell.css";
+import "./styles/sidebar.css";
+import "./styles/source.css";
+import "./styles/scan.css";
+import "./styles/results.css";
+import "./styles/inspector.css";
+import "./styles/overlays.css";
 
-export default function App() {
-  const [view, setView] = useState<View>("select");
-  const [disks, setDisks] = useState<DiskInfo[]>([]);
-  const [scanId, setScanId] = useState<string | null>(null);
-  const [scanDeep, setScanDeep] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [loadingDisks, setLoadingDisks] = useState(false);
+/** Tab/stage swap wrapper: the entering view fades 0->1 over the solid
+ * page background; the old view unmounts INSTANTLY (conditional
+ * render — no exit tween, no lingering layer). The wrapper carries
+ * the solid background so the fade never flashes. */
+function StageSwap({ children }: { children: React.ReactNode }) {
+  return <div className="dw-tab-swap">{children}</div>;
+}
 
-  useEffect(() => {
-    refreshDisks();
+function AppShell() {
+  const stage = useAppStore((s) => s.stage);
+  const inspectorVisible = useAppStore((s) => s.inspectorVisible);
+  const scannedId = useAppStore((s) => s.scanId);
+  const recoveryOpen = useAppStore((s) => s.recoveryOpen);
+  const toast = useAppStore((s) => s.toast);
+
+  const startScan = useCallback(async (source: ChosenSource, deep: boolean) => {
+    const scan = useScanStore.getState();
+    try {
+      const scanId = await scan.startScan(source.uri, deep, source.partition);
+      useAppStore.getState().beginScan(scanId, deep, source);
+    } catch (e) {
+      useAppStore.getState().setToast({ text: `Could not start the scan: ${String(e)}`, kind: "err" });
+    }
   }, []);
 
-  async function refreshDisks() {
-    setLoadingDisks(true);
-    setError(null);
+  const resumeScan = useCallback(async (saved: SavedScanSummary) => {
+    const scan = useScanStore.getState();
     try {
-      const res = await invoke<{ disks: DiskInfo[] }>("list_disks", {
-        req: {},
+      const scanId = await scan.resumeScan(saved.scan_id, saved.mode === "deep");
+      const label = saved.source_uri.split(/[\\/]/).pop() ?? saved.source_uri;
+      useAppStore.getState().beginScan(scanId, saved.mode === "deep", {
+        uri: saved.source_uri,
+        label,
+        detail: "Resumed saved scan",
+        partition: null,
       });
-      setDisks(res.disks);
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoadingDisks(false);
+      useAppStore.getState().setToast({ text: `Could not resume: ${String(e)}`, kind: "err" });
     }
-  }
+  }, []);
 
-  async function startScan(sourceUri: string, deep: boolean) {
-    setError(null);
-    try {
-      const res = await invoke<{ scan_id: string }>("start_scan", {
-        req: {
-          source_uri: sourceUri,
-          deep,
-          max_results: 1_000_000,
-          file_filter: [],
-        },
-      });
-      setScanId(res.scan_id);
-      setScanDeep(deep);
-      setView("scanning");
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function resumeScan(savedScanId: string, deep: boolean) {
-    setError(null);
-    try {
-      const res = await invoke<{ scan_id: string }>("resume_scan", {
-        req: { saved_scan_id: savedScanId, deep },
-      });
-      setScanId(res.scan_id);
-      setScanDeep(deep);
-      setView("scanning");
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  async function cancelScan() {
-    if (scanId) {
-      try {
-        await invoke("cancel_scan", { req: { scan_id: scanId } });
-      } catch (e) {
-        setError(String(e));
-      }
-    }
-    setScanId(null);
-    setView("select");
-  }
+  // Boot: install the persistent scan listeners + warm the disk list.
+  useEffect(() => {
+    useScanStore.getState().ensureListeners();
+    warmDisks();
+    // Best-effort saved scans warm (the sidebar also loads its own).
+    invoke<{ scans: SavedScanSummary[] }>("list_saved_scans", { req: {} })
+      .then((res) => {
+        useAppStore.getState().setSavedScans(res.scans ?? []);
+        useAppStore.getState().setSavedLoading(false);
+      })
+      .catch(() => useAppStore.getState().setSavedLoading(false));
+  }, []);
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex shrink-0 items-center justify-between border-b border-zinc-800/80 bg-zinc-900/40 px-6 py-3 backdrop-blur">
-        <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 shadow-lg shadow-blue-950/30">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M12 3v4m0 4v10M4.9 7.5l2.9 1.7m8.4 4.9l2.9 1.7m0-8.3l-2.9 1.7M7.8 14.1l-2.9 1.7"
-                stroke="white"
-                strokeWidth="1.9"
-                strokeLinecap="round"
-              />
-            </svg>
-          </div>
-          <div>
-            <h1 className="text-[15px] leading-tight font-semibold">
-              Data Wizard
-            </h1>
-            <p className="text-xs leading-tight text-zinc-500">
-              Free, open-source file recovery
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-zinc-500">
-          <span>v0.1.0</span>
-          <span aria-hidden className="text-zinc-700">
-            |
-          </span>
-          <a
-            className="text-blue-400 transition-colors hover:text-blue-300"
-            href="https://github.com/heictojpgpics/data-wizard-rs"
-            target="_blank"
-            rel="noreferrer"
-          >
-            GitHub
-          </a>
-        </div>
-      </header>
-
-      <main key={view} className="animate-view flex-1 overflow-auto p-6">
-        {error && (
-          <div className="mx-auto mb-4 max-w-4xl rounded-xl border border-red-700/50 bg-red-950/40 p-3.5 text-sm text-red-200">
-            <div className="flex items-start justify-between gap-4">
-              <p className="break-words">{error}</p>
-              <button
-                onClick={() => setError(null)}
-                className="shrink-0 rounded p-0.5 text-red-400 transition-colors hover:text-red-200"
-                aria-label="Dismiss"
-              >
-                <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-                  <path
-                    d="M2 2l10 10M12 2L2 12"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {view === "select" && (
-          <SelectSource
-            disks={disks}
-            loading={loadingDisks}
-            onRefresh={refreshDisks}
-            onScan={startScan}
-            onResume={resumeScan}
-          />
-        )}
-
-        {view === "scanning" && scanId && (
-          <ScanningView
-            scanId={scanId}
-            deep={scanDeep}
-            onViewResults={() => setView("results")}
-            onCancel={cancelScan}
-          />
-        )}
-
-        {view === "results" && scanId && (
-          <ResultsView scanId={scanId} onBack={() => setView("select")} />
-        )}
-      </main>
+    <div className="dw-app">
+      <TopBar />
+      <div className="dw-body">
+        <Sidebar />
+        <main className="dw-main">
+          <StageSwap key={stage}>
+            {stage === "source" && <SelectSource onScan={startScan} onResume={resumeScan} />}
+            {stage === "scanning" && (
+              <ScanningView onViewResults={() => useAppStore.getState().setStage("results")} />
+            )}
+            {stage === "results" && scannedId && (
+              <ResultsView onBack={() => useAppStore.getState().clearScan()} />
+            )}
+          </StageSwap>
+        </main>
+        {stage === "results" && inspectorVisible && <FileInspector />}
+      </div>
+      <StatusBar />
+      {recoveryOpen && <RecoveryDialog />}
+      {toast && <Toasts key={toast.id} />}
+      <TourDriver />
     </div>
   );
 }
+
+export default AppShell;

@@ -841,3 +841,146 @@ Stage Summary:
 - Pipelines running on the combined push; pending at write time:
   Build and Test (build/installers/msix) green, ReFS sample artifact
   for local layout analysis
+
+---
+Task ID: 1 (session 8)
+Agent: main (Super Z)
+Task: Full UI/UX redesign — DiskGenie-caliber design system, mock mode for agentic dev, NSIS/MSIX build pipeline port, Windows-runner screenshots
+
+Work Log:
+- Context recovered: read worklog sessions 1-7, docs/INDEX, ui-ux flows+patterns,
+  dw-ipc types+commands, src-tauri commands/state/main, current ui/ views.
+- Cloned + analyzed diskgenie-v2 (the reference): theme tokens (5 themes, 2-layer
+  data-theme/data-scheme attribute system), mock command registry (browser-dev
+  mode, DEV-gated dynamic import — never in release bundles), TourDriver
+  (title-stamped CI screenshot tours), CI (gates + NSIS bundle + MSIX MakeAppx
+  + ui-screenshots workflows), build.ps1.
+- ROOT CAUSE of "no CSS in release": Tailwind 4 was in devDependencies +
+  `@import "tailwindcss"` in index.css but NO @tailwindcss/vite plugin and NO
+  postcss config — verified by building: dist CSS contains the theme-variables
+  prelude and preflight only; `@layer utilities{@tailwind utilities;}` is EMPTY.
+  Every utility class silently does nothing => unstyled text.
+- DECISION: rebuild the UI styling from scratch with DiskGenie's architecture —
+  plain CSS + design tokens (no Tailwind). No fragile build step; matches the
+  reference exactly; enables the identical 5-theme system.
+- Design concept: "calm recovery studio" — teal ink identity (recovery/safety
+  semantics) on Apple-grade neutral surfaces; 56px drag-region topbar with
+  wizard step tracker; sources sidebar; results table + inspector; CSS-only
+  motion (DiskGenie's own worklogs converged from framer to CSS keyframes).
+
+Stage Summary:
+- Analysis complete; implementation begins: theme system -> lib/ipc+mock ->
+  shell -> views -> build pipeline -> CI screenshots.
+
+---
+Task ID: 2 (session 8)
+Agent: main (Super Z)
+Task: Implement the full UI/UX redesign — theme system, shell, views, mock
+mode, tour driver; wire to the real core; port the DiskGenie build pipeline
+
+Work Log:
+- THEME SYSTEM (ui/src/theme/): tokens.css with the full two-layer
+  architecture (5 themes: light/dark/ember/tide/blossom — recovery-teal
+  ink on light/dark, DiskGenie's ember/tide/blossom palettes kept),
+  themes.ts registry + useTheme.ts (View-Transition crossfade,
+  localStorage persistence, native window theme sync). index.html
+  carries the pre-mount theme script + per-theme background ladder
+  (no first-paint flash).
+- STYLES: replaced Tailwind entirely with token-driven plain CSS
+  (8 sheets: base/shell/sidebar/source/scan/results/inspector/overlays)
+  — the shared control vocabulary (ink/outline/ghost buttons, chips,
+  inputs, checkbox, track, skeletons, spinner) + the motion ladder
+  (120/160/240/360ms, pure CSS keyframes, reduced-motion collapse).
+- IPC + STATE: lib/ipc.ts mock-capable invoke/listen bus; zustand
+  stores (state/app.ts wizard machine + browsing + selection +
+  inspector; state/scan.ts persistent scan listeners + start/resume/
+  cancel); lib/format.ts gained the TS mirror of dw-core classify
+  (8 categories + status labels/explanations/colors).
+- MOCK LAYER (ui/src/mock/, DEV+browser only, dynamic import — never
+  in release bundles): 4 synthetic disks, ~120-file deleted population
+  with realistic names/paths/statuses, phased scan ticker emitting
+  scan:progress, growing list_results, scan_stats, recovery stream
+  with per-file outcomes + collision renames, saved-scan store, and
+  __DW_MOCK__ debug handle (finishScan fast-forward).
+- SHELL: TopBar (56px drag region: brand, wizard step tracker with
+  sliding ink pill, read-only trust chip, theme quick-toggle + 5-theme
+  picker popover, caption buttons), contextual Sidebar (saved scans +
+  safety education on source; live scan context; category rail on
+  results), 30px StatusBar, Toasts (keyed remount + self-dismiss
+  lifecycle), RecoveryDialog (destination picker, different-drive
+  warning, collision policy cards, live progress stream, summary).
+- VIEWS: SelectSource (hero + trust strip + disk cards with expandable
+  partition rows + image opener + saved scans), ScanningView (orb,
+  phase timeline, progress + rate, live found-file feed, terminal
+  panels), ResultsView (stat cards, search/status toolbar, virtualized
+  40px rows with selection, sticky selection bar, inspector with
+  confidence meter + facts).
+- TOUR DRIVER (ui/src/shell/TourDriver.tsx): title-stamped steps
+  (Data Wizard · tNN-name) covering source, partitions, all 5 themes,
+  mid-scan capture (stamp-before-wait), results, category filter,
+  search, selection, inspector, recovery dialog; ?tour=1 in the
+  browser mock, DATAWIZARD_TOUR/DATAWIZARD_SCAN/DATAWIZARD_WINDOW env
+  vars in the real app (new get_dev_hooks Rust command).
+- RUST: get_dev_hooks command + registration; window created hidden
+  and revealed in setup with optional DATAWIZARD_WINDOW sizing;
+  tauri.conf.json: decorations:false (custom caption), 1360x840 /
+  min 1180x700, NSIS per-user + WebView2 embedBootstrapper, targets
+  [nsis]; 3 latent clippy lints in commands.rs fixed (redundant_locals
+  + 2 collapsible_ifs — src-tauri was never clippy-gated before).
+- BUILD PIPELINE: root package.json with @tauri-apps/cli (npx tauri —
+  no 5-min cargo install); packaging/msix/AppxManifest.xml template;
+  scripts/build.ps1 (gates + NSIS + MSIX + portable + sums);
+  windows-build-and-test.yml rewritten (npx tauri build, NSIS-only
+  bundle + NSIS smoke + local-signed MSIX smoke from the committed
+  template); NEW msix-build.yml (DiskGenie Store-ready unsigned MSIX
+  with generated asset set + WACK advisory); NEW ui-screenshots.yml
+  (staged 512MB NTFS VHD with deleted population, title-synced one-
+  frame-per-step capture, cadence fallback, VHD cleanup); release.yml
+  rewritten (NSIS + MSIX + portable + SHA256SUMS256 + gh draft
+  release attach on tags).
+- FIX: the recurring stale vite.config.js emission — tsconfig.node
+  .json now emits declarations only into ui/.tsbuild/ (gitignored);
+  the vite __dirname warning is gone (import.meta.url dirname).
+- VALIDATION: UI typecheck + eslint (react-hooks v7 strict rules all
+  satisfied: no setState-in-effect, no refs-in-render, no impure
+  render, no component aliasing through runtime calls — added the
+  module-level CategoryGlyph for render-safe icons), production build
+  clean, vite dev clean; full agent-browser pass over the mock UI with
+  VLM reviews: source view 8.5/10, results+recovery flow 8/10 (fixed
+  the empty progress-stream container — now streams from recovery:
+  progress events; scrim blur; confidence-bar optical alignment;
+  clearer summary copy), all 5 themes 9-10/10 with correct accent
+  switching, inspector 9/10; browser tour ?tour=1 runs to tour-done
+  with zero console/page errors; Rust: fmt + clippy(msvc) + 333
+  workspace tests green; src-tauri msvc cross-check green.
+
+Stage Summary:
+- The "no CSS in release" root cause (unwired Tailwind 4) is dead:
+  the UI is now plain token CSS by construction.
+- Premium 5-theme UI/UX wired to the real 12-command core surface;
+  mock browser mode for agentic dev + VLM validation loops; title-
+  synced CI screenshot tours; DiskGenie-grade NSIS/MSIX pipeline.
+- Pending: watch the new workflows run green on the draft push; then
+  merge to main.
+
+---
+Task ID: 3 (session 8, addendum)
+Agent: main (Super Z)
+Task: Rebase onto the moved draft branch before pushing
+
+Work Log:
+- git fetch showed origin/draft advanced by 4 commits (refs-sample C#
+  zero-check work + the msix smoke pivot: f81f869 replaced the launch
+  activation test with package-integrity asserts because the activation
+  broker denies detached sessions and WindowsApps ACLs are
+  TrustedInstaller-owned on headless runners).
+- Stashed, fast-forwarded draft, popped; resolved windows-build-and-
+  test.yml by keeping the new pipeline structure (NSIS-only bundle +
+  template-based MSIX packaging) and adopting upstream's integrity
+  assertions verbatim for the MSIX test step (install + inventory +
+  manifest references + runFullTrust capability + removal; launch
+  remains the interactive README-MSIX check).
+
+Stage Summary:
+- The branch is synced with origin/draft (65d2062) + this session's
+  work; ready to commit and push.

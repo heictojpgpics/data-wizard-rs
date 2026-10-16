@@ -62,3 +62,4 @@ skills/
 
 # TypeScript incremental build state
 *.tsbuildinfo
+ui/.tsbuild/

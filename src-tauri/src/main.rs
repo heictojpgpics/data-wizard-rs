@@ -45,15 +45,42 @@ fn main() {
             commands::list_results,
             commands::scan_stats,
             commands::recover_files,
+            commands::get_dev_hooks,
         ])
         .setup(|app| {
             // Create the app state with the AppHandle (needed for
             // TauriProgressSink to emit events to the webview).
             let state = Arc::new(RwLock::new(AppState::new(app.handle().clone())));
             app.manage(state);
+
+            // Reveal the main window only after it exists (it is created
+            // hidden in tauri.conf.json so the first frame lands with the
+            // theme CSS applied — no white flash). The optional
+            // DATAWIZARD_WINDOW spec (e.g. `1280x800`) sizes the CI
+            // screenshot/tour runs; malformed specs fall back to the
+            // configured default.
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some((w, h)) =
+                    parse_window_spec(&std::env::var("DATAWIZARD_WINDOW").unwrap_or_default())
+                {
+                    let _ = window.set_size(tauri::LogicalSize::new(w, h));
+                    let _ = window.center();
+                }
+                let _ = window.show();
+            }
+
             tracing::info!("Tauri setup complete");
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Parse the `DATAWIZARD_WINDOW` dev hook (`1280x800`, case-insensitive
+/// `X` separator). `None` on any malformed spec.
+fn parse_window_spec(spec: &str) -> Option<(f64, f64)> {
+    let lowered = spec.trim().to_lowercase();
+    let (w, h) = lowered.split_once('x')?;
+    let (w, h) = (w.trim().parse::<f64>().ok()?, h.trim().parse::<f64>().ok()?);
+    (w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0).then_some((w, h))
 }

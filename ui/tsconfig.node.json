@@ -7,6 +7,9 @@
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "composite": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": ".tsbuild",
     "strict": true,
     "types": ["node"]
   },

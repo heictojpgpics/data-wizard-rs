@@ -1,4 +1,4 @@
-// Formatting and small display helpers shared across views.
+// Formatting, classification and display helpers shared across views.
 
 import type { RecoveryStatusDto } from "../bindings";
 
@@ -6,7 +6,20 @@ export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`;
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`;
-  return `${(n / 1024 ** 3).toFixed(2)} GB`;
+  if (n < 1024 ** 4) return `${(n / 1024 ** 3).toFixed(2)} GB`;
+  return `${(n / 1024 ** 4).toFixed(2)} TB`;
+}
+
+/** Compact integer with thousands separators. */
+export function formatCount(n: number): string {
+  return n.toLocaleString(undefined);
+}
+
+/** Rate like "1.2k files/min" / "834 files/min". */
+export function formatRate(perSecond: number): string {
+  const perMin = perSecond * 60;
+  if (perMin >= 1000) return `${(perMin / 1000).toFixed(1)}k files/min`;
+  return `${Math.round(perMin)} files/min`;
 }
 
 /**
@@ -18,7 +31,7 @@ export function parseFsTime(s: string | null): Date | null {
   if (!s) return null;
   // "YYYY-MM-DD HH:MM:SS.f +OO:OO:OO" -> "YYYY-MM-DDTHH:MM:SS+OO:OO"
   const m = s.match(
-    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*([+-]\d{2}:\d{2})?/
+    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})(?:\.\d+)?\s*([+-]\d{2}:\d{2})?/,
   );
   if (m) {
     const iso = `${m[1]}T${m[2]}${m[3] ?? "Z"}`;
@@ -35,6 +48,17 @@ export function formatDate(d: Date | null): string {
     year: "numeric",
     month: "short",
     day: "numeric",
+  });
+}
+
+export function formatDateTime(d: Date | null): string {
+  if (!d) return "unknown";
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 
@@ -56,52 +80,137 @@ export function statusLabel(s: RecoveryStatusDto): string {
   }
 }
 
-/** Tailwind text color for a status. */
-export function statusColor(s: RecoveryStatusDto): string {
+/** One-line plain-language explanation of what a status means. */
+export function statusExplanation(s: RecoveryStatusDto): string {
   switch (s) {
     case "Intact":
-      return "text-emerald-400";
+      return "File records are complete and the data blocks are untouched — this should recover exactly as it was.";
     case "PartiallyRecovered":
-      return "text-amber-400";
+      return "Some data blocks are missing or damaged; the file will recover but may be incomplete or corrupt.";
     case "Overwritten":
-      return "text-red-400";
+      return "New data has taken this file's place on disk. Recovery is not possible for this entry.";
     case "Carved":
-      return "text-sky-400";
+      return "Found by raw signature scan in unallocated space. Size is estimated from the header.";
     case "CarvedValidated":
-      return "text-cyan-300";
+      return "Found by raw scan and structure-checked (e.g. JPEG end-marker verified) — high confidence.";
     case "PendingValidation":
-      return "text-zinc-400";
+      return "Found by raw scan; structure validation has not run for this type yet.";
   }
 }
 
-/** Tailwind chip background for a status. */
-export function statusChip(s: RecoveryStatusDto): string {
+/** CSS var for a status color (tokens define per-theme values). */
+export function statusVar(s: RecoveryStatusDto): string {
   switch (s) {
     case "Intact":
-      return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
+      return "var(--st-intact)";
     case "PartiallyRecovered":
-      return "bg-amber-500/10 text-amber-400 border-amber-500/30";
+      return "var(--st-partial)";
     case "Overwritten":
-      return "bg-red-500/10 text-red-400 border-red-500/30";
+      return "var(--st-overwritten)";
     case "Carved":
-      return "bg-sky-500/10 text-sky-400 border-sky-500/30";
+      return "var(--st-carved)";
     case "CarvedValidated":
-      return "bg-cyan-500/10 text-cyan-300 border-cyan-500/30";
+      return "var(--st-validated)";
     case "PendingValidation":
-      return "bg-zinc-500/10 text-zinc-400 border-zinc-500/30";
+      return "var(--st-pending)";
   }
 }
 
-export function categoryColor(index: number): string {
-  const palette = [
-    "#38bdf8",
-    "#818cf8",
-    "#f472b6",
-    "#34d399",
-    "#fbbf24",
-    "#f87171",
-    "#a78bfa",
-    "#94a3b8",
-  ];
-  return palette[index % palette.length];
+/* ═════════════════════════════════════════════════════════════════════
+ * Category system — a TS mirror of dw-core's classify.rs so the UI can
+ * bucket rows and drive the category rail without extra IPC.
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export type CategoryId =
+  | "photos"
+  | "videos"
+  | "audio"
+  | "documents"
+  | "archives"
+  | "email"
+  | "code"
+  | "other";
+
+export const CATEGORIES: { id: CategoryId; label: string; varName: string }[] = [
+  { id: "photos", label: "Photos", varName: "--cat-photos" },
+  { id: "videos", label: "Videos", varName: "--cat-videos" },
+  { id: "audio", label: "Audio", varName: "--cat-audio" },
+  { id: "documents", label: "Documents", varName: "--cat-documents" },
+  { id: "archives", label: "Archives", varName: "--cat-archives" },
+  { id: "email", label: "Email", varName: "--cat-email" },
+  { id: "code", label: "Code", varName: "--cat-code" },
+  { id: "other", label: "Other", varName: "--cat-other" },
+];
+
+/** CSS var for a category's color. */
+export function categoryVar(c: CategoryId): string {
+  const entry = CATEGORIES.find((x) => x.id === c);
+  return `var(${entry?.varName ?? "--cat-other"})`;
+}
+
+const EXT_TO_CATEGORY: Record<string, CategoryId> = {};
+function reg(category: CategoryId, exts: string[]): void {
+  for (const e of exts) EXT_TO_CATEGORY[e] = category;
+}
+reg("photos", "jpg jpeg jpe jfif png gif bmp tif tiff webp heic heif avif ico psd svg dng cr2 cr3 nef arw orf rw2 raf raw".split(" "));
+reg("videos", "mp4 m4v mov avi mkv webm wmv flv f4v mpg mpeg mp2 3gp 3g2 mts m2ts mxf vob ogv".split(" "));
+reg("audio", "mp3 m4a aac wav flac ogg oga opus wma aiff aif mid midi amr".split(" "));
+reg("documents", "pdf doc docx xls xlsx ppt pptx odt ods odp rtf txt md csv tsv epub pages numbers key hwp".split(" "));
+reg("archives", "zip rar 7z tar gz bz2 xz zst lz4 tgz tbz2 txz cab iso dmg vhd vhdx wim img dd vmdk".split(" "));
+reg("email", "pst ost eml msg mbox dbx".split(" "));
+reg("code", "rs c h cpp hpp cc py js jsx ts tsx java kt go rb php cs swift m mm sh ps1 bat cmd html htm css scss json xml yml yaml toml ini cfg conf sql ipynb".split(" "));
+
+/** Classify a file extension (lowercase, no dot) — mirrors the Rust
+ * classifier's buckets. */
+export function categoryOf(ext: string): CategoryId {
+  return EXT_TO_CATEGORY[ext] ?? "other";
+}
+
+/** The extension list for one category (used to build server-side
+ * extension_filter requests for list_results). */
+export function extensionsOf(c: CategoryId): string[] {
+  return Object.entries(EXT_TO_CATEGORY)
+    .filter(([, cat]) => cat === c)
+    .map(([ext]) => ext);
+}
+
+/* ── File-type glyph metadata (per-extension accent + label) ─────────── */
+
+export function fileKindLabel(ext: string): string {
+  const c = categoryOf(ext);
+  return CATEGORIES.find((x) => x.id === c)?.label ?? "Other";
+}
+
+/** Bus type display label. */
+export function busLabel(bus: string): string {
+  switch (bus) {
+    case "Nvme":
+      return "NVMe SSD";
+    case "Sata":
+      return "SATA";
+    case "Usb":
+      return "USB";
+    case "Sd":
+      return "SD card";
+    case "Mmc":
+      return "MMC";
+    case "Virtual":
+      return "Virtual";
+    case "IScsi":
+      return "iSCSI";
+    case "FibreChannel":
+      return "Fibre Channel";
+    default:
+      return "Disk";
+  }
+}
+
+/** Short relative-ish duration ("3 min ago" style) for saved scans. */
+export function timeAgo(iso: string): string {
+  const t = parseFsTime(iso) ?? new Date(iso);
+  const secs = Math.max(0, (Date.now() - t.getTime()) / 1000);
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)} h ago`;
+  return `${Math.floor(secs / 86400)} d ago`;
 }

@@ -4,8 +4,51 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Data Wizard</title>
+    <style>
+      /* Pre-CSS paint: the WebView's first frame matches the app canvas
+         of the ACTIVE theme instead of flashing white before the
+         stylesheet arrives. Pairs with the window backgroundColor. */
+      html {
+        background: #f6f8f7;
+      }
+      html[data-theme="dark"] {
+        background: #171b1a;
+      }
+      html[data-theme="ember"] {
+        background: #201a15;
+      }
+      html[data-theme="tide"] {
+        background: #101722;
+      }
+      html[data-theme="blossom"] {
+        background: #fbf1ee;
+      }
+    </style>
+    <script>
+      // Pre-mount theme application: the saved theme (localStorage) is
+      // applied BEFORE React mounts so there is no flash. Runs
+      // synchronously in <head>. Default on first launch is LIGHT.
+      // The theme registry lives in src/theme/themes.ts — this inline
+      // copy mirrors its ids/families.
+      (function () {
+        try {
+          var saved = localStorage.getItem("datawizard.theme");
+          var theme = ["light", "dark", "ember", "tide", "blossom"].indexOf(saved) >= 0
+            ? saved
+            : "light";
+          var scheme =
+            theme === "dark" || theme === "ember" || theme === "tide" ? "dark" : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+          document.documentElement.setAttribute("data-scheme", scheme);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "light");
+          document.documentElement.setAttribute("data-scheme", "light");
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-zinc-950 text-zinc-100">
+
+  <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

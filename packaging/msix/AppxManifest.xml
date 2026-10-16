@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Data Wizard MSIX manifest TEMPLATE (packaged by .github/workflows/msix-build.yml
+  and the release workflow).
+
+  Placeholders (substituted in CI):
+    __IDENTITY_NAME__  Partner Center package identity Name (the reserved
+                       app name) — workflow input store_identity_name.
+    __PUBLISHER__      Partner Center package identity Publisher (CN=…) —
+                       workflow input store_publisher.
+    __VERSION__        App version + CI run number (4-part, monotonic).
+
+  Capabilities:
+    runFullTrust  the standard restricted capability for packaged desktop
+                  (Win32) apps — auto-granted for the desktop bridge.
+
+  MinVersion 10.0.19041.0: the WebView2 Runtime is inbox/preinstalled there
+  (MSIX cannot embed the NSIS bootstrapper — Store distribution guidance).
+-->
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="mp uap rescap">
+  <Identity Name="__IDENTITY_NAME__"
+            Publisher="__PUBLISHER__"
+            Version="__VERSION__"
+            ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Data Wizard</DisplayName>
+    <PublisherDisplayName>Data Wizard Project</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <Description>Data Wizard — free, open-source data recovery. NTFS, FAT, exFAT, ext, HFS+, Btrfs, ZFS and raw carving, from a memory-safe Rust core.</Description>
+  </Properties>
+  <Resources>
+    <Resource Language="en-US" />
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Applications>
+    <Application Id="DataWizard"
+                 Executable="dw-tauri.exe"
+                 EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Data Wizard"
+                          Description="Free, open-source data recovery"
+                          BackgroundColor="#0D9488"
+                          Square44x44Logo="Assets\Square44x44Logo.targetsize-44.png"
+                          Square150x150Logo="Assets\Square150x150Logo.png" />
+    </Application>
+  </Applications>
+</Package>

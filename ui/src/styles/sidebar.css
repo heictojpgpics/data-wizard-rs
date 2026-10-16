@@ -1,0 +1,318 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Sidebar — the contextual supporting column: sections, saved scans,
+ * safety notes, live scan context, category rail, actions.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.dw-sidebar {
+  width: var(--sidebar-w);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--divider);
+  background: var(--panel);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.dw-side-section {
+  padding: 16px 14px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.dw-side-section-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  color: var(--text-tertiary);
+}
+
+.dw-side-section-icon {
+  display: grid;
+  place-items: center;
+}
+
+.dw-side-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Notes + skeletons ────────────────────────────────────────────────── */
+.dw-side-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+/* ── Saved scans ──────────────────────────────────────────────────────── */
+.dw-side-saved {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dw-side-saved-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 9px;
+  border-radius: var(--radius-s);
+  text-align: left;
+  transition: background var(--dur-micro) var(--ease-out);
+}
+.dw-side-saved-btn:hover {
+  background: var(--control-hover);
+}
+
+.dw-side-saved-glyph {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  background: var(--chip);
+  color: var(--text-secondary);
+  flex: none;
+}
+
+.dw-side-saved-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.dw-side-saved-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-side-saved-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Safety notes ─────────────────────────────────────────────────────── */
+.dw-side-safety {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dw-side-safety li {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  padding-left: 14px;
+  position: relative;
+}
+.dw-side-safety li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--free);
+  opacity: 0.75;
+}
+.dw-side-safety strong {
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* ── Live scan context ────────────────────────────────────────────────── */
+.dw-side-scan {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px;
+  border-radius: var(--radius-s);
+  background: var(--card);
+  border: 1px solid var(--divider);
+  margin-bottom: 10px;
+}
+
+.dw-side-scan-name {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-side-scan-detail {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  line-height: 1.45;
+}
+
+.dw-side-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dw-side-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Phase list (scanning stage) ──────────────────────────────────────── */
+.dw-side-phases {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dw-side-phase {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+
+.dw-side-phase-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  flex: none;
+  transition: background var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+.dw-side-phase.dw-done {
+  color: var(--text-secondary);
+}
+.dw-side-phase.dw-done .dw-side-phase-dot {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.dw-side-phase.dw-active {
+  color: var(--ink);
+  background: var(--ink-soft);
+  font-weight: 650;
+}
+.dw-side-phase.dw-active .dw-side-phase-dot {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--ink-soft);
+}
+
+/* ── Category rail (results stage) ────────────────────────────────────── */
+.dw-side-cats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dw-side-cat {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: var(--radius-s);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  transition: background var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out);
+}
+.dw-side-cat:hover {
+  background: var(--control-hover);
+  color: var(--text);
+}
+.dw-side-cat.dw-active {
+  background: var(--ink-soft);
+  color: var(--ink);
+}
+
+.dw-side-cat-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.dw-side-cat-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-side-cat-count {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  flex: none;
+}
+.dw-side-cat.dw-active .dw-side-cat-count {
+  color: var(--ink);
+}
+
+.dw-side-cat-bytes {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+  opacity: 0.8;
+}
+
+/* ── Actions ──────────────────────────────────────────────────────────── */
+.dw-side-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.dw-side-action {
+  justify-content: flex-start;
+}
+
+/* ── Sidebar footer ───────────────────────────────────────────────────── */
+.dw-sidebar-foot {
+  margin-top: auto;
+  padding: 14px;
+}
+
+.dw-side-free {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 11px 12px;
+  border-radius: var(--radius-m);
+  background: var(--ink-soft);
+  color: var(--ink);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.dw-side-free svg {
+  flex: none;
+  margin-top: 1.5px;
+}
+.dw-side-free strong {
+  font-weight: 700;
+}

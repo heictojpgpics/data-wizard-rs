@@ -1,0 +1,416 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Results — header band, stat cards, toolbar, the virtualized table,
+ * and the sticky selection bar.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+.dw-results-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ── Header band ──────────────────────────────────────────────────────── */
+.dw-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 0;
+}
+
+.dw-results-head-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dw-results-title {
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.dw-results-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-results-head-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+/* ── Stat cards ───────────────────────────────────────────────────────── */
+.dw-stats-row {
+  display: flex;
+  gap: 10px;
+  padding: 14px 22px 4px;
+  flex-wrap: wrap;
+}
+
+.dw-stat-card {
+  flex: 1;
+  min-width: 140px;
+  border-radius: var(--radius-m);
+  border: 1px solid var(--divider);
+  background: var(--card);
+  padding: 11px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dw-stat-value {
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.dw-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.dw-stat-card.dw-ink .dw-stat-value {
+  color: var(--ink);
+}
+.dw-stat-card.dw-ok .dw-stat-value {
+  color: var(--free);
+}
+.dw-stat-card.dw-warn .dw-stat-value {
+  color: var(--st-partial);
+}
+
+/* ── Toolbar ──────────────────────────────────────────────────────────── */
+.dw-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 22px 12px;
+}
+
+.dw-filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.dw-search-capsule {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--control-border);
+  background: var(--card);
+  color: var(--text-tertiary);
+  min-width: 240px;
+  transition: border-color var(--dur-micro) var(--ease-out);
+}
+.dw-search-capsule:focus-within {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px var(--ink-soft);
+}
+
+.dw-search-input {
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+}
+.dw-search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.dw-select-capsule {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-tertiary);
+}
+
+.dw-filter-select {
+  height: 34px;
+}
+
+/* ── Table zone ───────────────────────────────────────────────────────── */
+.dw-table-zone {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin: 0 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--card);
+  overflow: hidden;
+  position: relative;
+}
+
+.dw-table-head {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  border-bottom: 1px solid var(--divider);
+  background: var(--panel);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+
+.dw-th {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0 10px;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.dw-th:hover {
+  color: var(--text-secondary);
+}
+
+.dw-th-check { width: 44px; justify-content: center; flex: none; }
+.dw-th-name { flex: 2.4; min-width: 0; }
+.dw-th-path { flex: 1.8; min-width: 0; }
+.dw-th-size { width: 84px; flex: none; justify-content: flex-end; }
+.dw-th-date { width: 104px; flex: none; }
+.dw-th-status { width: 130px; flex: none; }
+.dw-th-conf { width: 132px; flex: none; }
+
+.dw-sort-mark {
+  font-size: 8.5px;
+  color: var(--ink);
+}
+
+.dw-table-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+
+/* ── Rows ─────────────────────────────────────────────────────────────── */
+.dw-tr {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--divider);
+  cursor: default;
+  transition: background var(--dur-micro) var(--ease-out);
+}
+.dw-tr:last-child {
+  border-bottom: 0;
+}
+.dw-tr:hover {
+  background: color-mix(in srgb, var(--control-hover) 55%, transparent);
+}
+.dw-tr.dw-sel {
+  background: var(--ink-soft);
+}
+.dw-tr.dw-inspected {
+  box-shadow: inset 2.5px 0 0 var(--ink);
+}
+
+.dw-td {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 10px;
+  height: 100%;
+  font-size: 12.5px;
+}
+
+.dw-td-check { width: 44px; justify-content: center; flex: none; }
+.dw-td-name { flex: 2.4; min-width: 0; gap: 8px; }
+.dw-td-path { flex: 1.8; min-width: 0; }
+.dw-td-size { width: 84px; flex: none; justify-content: flex-end; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.dw-td-date { width: 104px; flex: none; color: var(--text-tertiary); font-size: 12px; }
+.dw-td-status { width: 130px; flex: none; }
+.dw-td-conf { width: 132px; flex: none; gap: 7px; }
+
+.dw-row-glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.dw-row-name {
+  color: var(--text);
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dw-row-deleted {
+  flex: none;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--used);
+  background: var(--used-soft);
+  border-radius: 4px;
+  padding: 1.5px 5px;
+}
+
+.dw-td-path {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Status pill ──────────────────────────────────────────────────────── */
+.dw-status-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dw-status-pill.dw-lg {
+  height: 24px;
+  font-size: 11.5px;
+}
+
+/* ── Confidence meter ─────────────────────────────────────────────────── */
+.dw-conf-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+  min-width: 34px;
+  /* Optical alignment with the 10.5px numeral beside it. */
+  margin-top: 1px;
+}
+.dw-conf-fill {
+  height: 100%;
+  border-radius: 999px;
+  opacity: 0.9;
+}
+.dw-conf-num {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  width: 22px;
+  text-align: right;
+  flex: none;
+}
+
+/* ── Table empty + loading ────────────────────────────────────────────── */
+.dw-table-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 64px 24px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+.dw-table-empty svg {
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+.dw-table-empty-title {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+.dw-table-empty-sub {
+  font-size: 12.5px;
+  max-width: 44ch;
+  line-height: 1.5;
+}
+
+.dw-table-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 12px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+/* ── Selection bar ────────────────────────────────────────────────────── */
+.dw-selection-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 10px 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--shadow-pop);
+  z-index: 10;
+  max-width: calc(100% - 44px);
+}
+
+.dw-selection-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dw-selection-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.dw-selection-bytes {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

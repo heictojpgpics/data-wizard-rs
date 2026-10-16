@@ -1,5 +1,10 @@
 name: Release
 
+# The tag pipeline (DiskGenie flow): the per-user NSIS installer + the
+# Store-ready MSIX (MakeAppx over the committed manifest template) +
+# the portable zip + SHA256SUMS256. Built once on the tag; every
+# artifact carries a checksum row.
+
 on:
   push:
     tags:
@@ -13,13 +18,14 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 permissions:
   contents: write
 
 jobs:
-  build-windows-release:
-    name: Build Windows release
+  release-windows:
+    name: Build Windows release (NSIS + MSIX + portable)
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -39,213 +45,149 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
-          cache-dependency-path: ui/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
 
-      - name: Install UI deps (locked)
-        working-directory: ui
-        run: npm ci
-
-      - name: Build UI
-        working-directory: ui
-        run: npm run build
-
-      # NOTE: tauri-cli MUST be installed with default features; without a
-      # TLS backend its WiX/NSIS downloads fail with
-      # "TLS required, but transport is unsecured".
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2" --locked
-
-      - name: Build Tauri bundle (MSI + NSIS)
-        run: cargo tauri build --target x86_64-pc-windows-msvc --bundles msi,nsis
-
-      - name: Build portable ZIP
+      - name: npm ci (root toolchain + ui, locked)
         shell: pwsh
         run: |
-          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
-          if (-not (Test-Path $exe)) { throw "portable exe missing" }
+          npm ci --no-audit --no-fund
+          npm --prefix ui ci --no-audit --no-fund
+
+      - name: Resolve the release tag
+        id: tag
+        shell: pwsh
+        run: |
           $tag = "${{ github.ref_name }}"
-          if (-not $tag -or $tag -eq "main") { $tag = "v${{ inputs.version }}" }
-          Compress-Archive -Path $exe -DestinationPath "data-wizard-$tag-windows-portable.zip"
-          Write-Host "Zip: data-wizard-$tag-windows-portable.zip"
+          if (-not $tag -or $tag -eq "main" -or $tag -eq "draft") { $tag = "v${{ inputs.version }}" }
+          if (-not $tag -or $tag -eq "v") { throw "no version: push a v*.*.* tag or pass the dispatch input" }
+          "tag=$tag" | Set-Content $env:GITHUB_OUTPUT
+          "version=$($tag.TrimStart('v'))" | Add-Content $env:GITHUB_OUTPUT
 
-      - name: Stage release files
+      - name: Read the Cargo app version
+        id: ver
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi" -Destination release\
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis\*.exe" -Destination release\
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\DataWizard.msix" -Destination release\
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\DataWizard-Test.cer" -Destination release\
-          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msix\README-MSIX.txt" -Destination release\
-          Move-Item "data-wizard-*-windows-portable.zip" -Destination release\
-          Get-ChildItem release | ForEach-Object {
-            $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
-            "$h  $($_.Name)" | Add-Content release\SHASUMS256.txt
-          }
-          Get-ChildItem release | Select-Object Name, Length | Format-Table
+          $version = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          "cargo_version=$version" | Set-Content $env:GITHUB_OUTPUT
+          # MSIX versions are 4-part and must increase per submission.
+          "msix_version=$version.${{ github.run_number }}" | Add-Content $env:GITHUB_OUTPUT
 
-      - name: Package MSIX
+      # ── 1. The NSIS installer (per-user + WebView2 embedBootstrapper) ──
+      - name: Build the NSIS installer
+        run: npx tauri build --target x86_64-pc-windows-msvc
+        timeout-minutes: 40
+
+      # ── 2. The Store-ready MSIX (MakeAppx over the manifest template) ──
+      - name: Build the MSIX package
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $release = "src-tauri\target\x86_64-pc-windows-msvc\release"
-          $out = Join-Path $release "bundle\msix"
-          New-Item -ItemType Directory -Force -Path "$out\assets" | Out-Null
-          Copy-Item "$release\dw-tauri.exe" -Destination "$out\dw-tauri.exe" -Force
-
+          $identityName = "DataWizard"
           $publisher = "CN=Data Wizard CI"
-          $identity   = "DataWizard"
-          $conf = Get-Content src-tauri\tauri.conf.json -Raw | ConvertFrom-Json
-          $version = "$($conf.version).0"
+          $version = "${{ steps.ver.outputs.msix_version }}"
+
+          $root = "msix-layout"
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "$root\Assets" | Out-Null
+          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
+          if (-not (Test-Path $exe)) { throw "exe not found: $exe" }
+          Copy-Item $exe "$root\dw-tauri.exe"
 
           Add-Type -AssemblyName System.Drawing
-          function Save-Icon([int]$size, [string]$file) {
-            $src = [System.Drawing.Image]::FromFile("$PWD\src-tauri\icons\icon.png")
+          $src = [System.Drawing.Bitmap]::FromFile("$(Resolve-Path 'packaging\icon\icon-source.png')")
+          function Save-Png([int]$size, [string]$name) {
             $bmp = New-Object System.Drawing.Bitmap $size, $size
             $g = [System.Drawing.Graphics]::FromImage($bmp)
             $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
             $g.DrawImage($src, 0, 0, $size, $size)
-            $bmp.Save($file, [System.Drawing.Imaging.ImageFormat]::Png)
-            $g.Dispose(); $bmp.Dispose(); $src.Dispose()
+            $bmp.Save("$root\Assets\$name", [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
           }
-          Save-Icon 88  "$out\assets\Square44x44Logo.scale-200.png"
-          Save-Icon 300 "$out\assets\Square150x150Logo.scale-200.png"
-          Save-Icon 50  "$out\assets\StoreLogo.png"
-
-          $manifest = @"
-          <?xml version="1.0" encoding="utf-8"?>
-          <Package
-            xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-            xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-            xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities">
-            <Identity Name="$identity" ProcessorArchitecture="x64" Publisher="$publisher" Version="$version" />
-            <Properties>
-              <DisplayName>Data Wizard</DisplayName>
-              <PublisherDisplayName>Data Wizard Project</PublisherDisplayName>
-              <Logo>assets\StoreLogo.png</Logo>
-            </Properties>
-            <Dependencies>
-              <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
-            </Dependencies>
-            <Capabilities>
-              <rescap:Capability Name="runFullTrust" />
-            </Capabilities>
-            <Applications>
-              <Application Id="DataWizard" Executable="dw-tauri.exe" EntryPoint="Windows.FullTrustProcess">
-                <uap:VisualElements
-                  DisplayName="Data Wizard"
-                  Description="Free and open-source data recovery for Windows."
-                  BackgroundColor="#09090b"
-                  Square150x150Logo="assets\Square150x150Logo.scale-200.png"
-                  Square44x44Logo="assets\Square44x44Logo.scale-200.png" />
-              </Application>
-            </Applications>
-          </Package>
-          "@
-          $manifest | Set-Content "$out\AppxManifest.xml" -Encoding utf8
-
-          # --- MakeAppx + signtool (robust discovery across runner images) ---
-          $tools = @{}
-          foreach ($exe in @("makeappx.exe", "signtool.exe")) {
-            $hit = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\$exe",
-                                 "C:\Program Files (x86)\Windows Kits\10\bin\$exe",
-                                 "C:\Program Files\Windows Kits\10\bin\*\x64\$exe" `
-              -ErrorAction SilentlyContinue |
-              Sort-Object FullName -Descending | Select-Object -First 1
-            if (-not $hit) {
-              Write-Host "=== $exe not found; Windows Kits bin tree: ==="
-              Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Depth 2 \
-                -ErrorAction SilentlyContinue | Select-Object -First 40 |
-                ForEach-Object { Write-Host $_.FullName }
-              throw "$exe not found under Windows Kits"
-            }
-            $tools[$exe] = $hit.FullName
-            Write-Host "Using $($hit.FullName)"
+          Save-Png 44  "Square44x44Logo.targetsize-44.png"
+          Save-Png 44  "Square44x44Logo.targetsize-44_altform-unplated.png"
+          Save-Png 48  "Square44x44Logo.targetsize-48.png"
+          Save-Png 88  "Square44x44Logo.targetsize-88.png"
+          Save-Png 176 "Square44x44Logo.targetsize-176.png"
+          Save-Png 150 "Square150x150Logo.png"
+          Save-Png 310 "Square310x310Logo.png"
+          Save-Png 50  "StoreLogo.png"
+          foreach ($tile in @(
+              @{ name = 'Wide310x150Logo.png'; w = 310; h = 150 },
+              @{ name = 'ScreenCapture620x300.png'; w = 620; h = 300 }
+            )) {
+            $bmp = New-Object System.Drawing.Bitmap $tile.w, $tile.h
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::FromArgb(255, 13, 148, 136))
+            $side = [Math]::Min($tile.h, 300)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.DrawImage($src, [int](($tile.w - $side) / 2), [int](($tile.h - $side) / 2), $side, $side)
+            $bmp.Save("$root\Assets\$($tile.name)", [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
           }
-          $makeappx = $tools["makeappx.exe"]
-          $signtool  = $tools["signtool.exe"]
-          & $makeappx pack /o /h SHA256 /d $out /p "$out\DataWizard.msix"
-          if ($LASTEXITCODE -ne 0) { throw "makeappx failed: $LASTEXITCODE" }
+          $src.Dispose()
 
-          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject $publisher `
-            -CertStoreLocation "Cert:\CurrentUser\My" `
-            -NotAfter (Get-Date).AddYears(2)
-          Export-Certificate -Cert $cert -FilePath "$out\DataWizard-Test.cer" | Out-Null
-          & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint "$out\DataWizard.msix"
-          if ($LASTEXITCODE -ne 0) { throw "signtool failed: $LASTEXITCODE" }
+          $manifest = (Get-Content -Raw "packaging\msix\AppxManifest.xml") `
+            -replace '__IDENTITY_NAME__', $identityName `
+            -replace '__PUBLISHER__', $publisher `
+            -replace '__VERSION__', $version
+          $manifest | Set-Content -Encoding UTF8 "$root\AppxManifest.xml"
 
-          @'
-          Installing the MSIX (test builds are signed with a self-signed CI cert)
-          1. Right-click DataWizard-Test.cer -> Install Certificate -> Local Machine ->
-             Place all certificates in Trusted People. (Or as admin:
-             Import-Certificate -FilePath .\DataWizard-Test.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople)
-          2. Double-click DataWizard.msix, or in PowerShell:
-             Add-AppxPackage .\DataWizard.msix
-          3. Launch "Data Wizard" from the Start menu.
-          '@ | Set-Content "$out\README-MSIX.txt" -Encoding utf8
-          Write-Host "MSIX packaged"
+          $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\MakeAppx.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeappx) { throw "MakeAppx.exe not found (Windows SDK)" }
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
+          & $makeappx.FullName pack /o /v /d $root /p "release\DataWizard-$version-x64.msix"
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed ($LASTEXITCODE)" }
 
-      - name: Verify staged files (fail if any channel is empty)
-        shell: pwsh
-        run: |
-          $expect = @('*.msi','*.exe','DataWizard.msix','DataWizard-Test.cer','data-wizard-*-windows-portable.zip','SHASUMS256.txt')
-          foreach ($pat in $expect) {
-            if (-not (Get-ChildItem release -Filter $pat)) { throw "missing release file: $pat" }
-          }
-
-      - name: Test MSI install / uninstall
+      # ── 3. Stage: installer + MSIX + portable + checksums ──────────────
+      - name: Stage release files
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $msi = Get-ChildItem "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\msi\*.msi" | Select-Object -First 1
-          $p = Start-Process msiexec -ArgumentList "/i `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "MSI install failed: $($p.ExitCode)" }
-          $key = Get-ChildItem "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" |
-            Get-ItemProperty | Where-Object { $_.DisplayName -like "*Data Wizard*" }
-          if (-not $key) { throw "MSI did not register" }
-          $exe = Join-Path $key.InstallLocation "dw-tauri.exe"
-          if (-not (Test-Path $exe)) { throw "installed exe missing" }
-          $app = Start-Process $exe -PassThru
-          Start-Sleep -Seconds 10
-          if ($app.HasExited) { throw "app exited immediately" }
-          Stop-Process -Id $app.Id -Force
-          $p = Start-Process msiexec -ArgumentList "/x `"$($msi.FullName)`" /qn /norestart" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "MSI uninstall failed" }
-          if (Test-Path $exe) { throw "exe still present after uninstall" }
-          Write-Host "MSI channel verified"
+          $tag = "${{ steps.tag.outputs.tag }}"
+          $version = "${{ steps.tag.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
 
-      - name: Test MSIX install / removal
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Import-Certificate -FilePath "release\DataWizard-Test.cer" -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" | Out-Null
-          Add-AppxPackage -Path "release\DataWizard.msix"
-          $pkg = Get-AppxPackage -Name DataWizard
-          if (-not $pkg) { throw "MSIX did not install" }
-          Remove-AppxPackage -Package $pkg.PackageFullName
-          if (Get-AppxPackage -Name DataWizard) { throw "MSIX still present" }
-          Write-Host "MSIX channel verified"
+          $installer = Get-ChildItem "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" -Filter "*.exe" |
+            Where-Object { $_.Name -notlike "*uninstall*" } | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer not found" }
+          Copy-Item $installer.FullName "release\DataWizard-$tag-windows-x64-setup.exe"
 
-      - name: Upload artifacts
-        if: always()
+          $portable = "release\portable"
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe" "$portable\DataWizard.exe"
+          @(
+            "Data Wizard $version portable. Runs without installing;",
+            "WebView2 Runtime is required (bundled with the setup exe instead)."
+          ) | Set-Content "$portable\README.txt"
+          Compress-Archive -Path $portable -DestinationPath "release\DataWizard-$tag-windows-x64-portable.zip" -Force
+          Remove-Item $portable -Recurse -Force
+
+          Get-ChildItem release -File | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content release\SHA256SUMS256.txt
+          Get-Content release\SHA256SUMS256.txt
+          Get-ChildItem release -File | Select-Object Name, @{ n = 'MB'; e = { [Math]::Round($_.Length / 1MB, 2) } } | Format-Table
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-files
-          path: release/
-          retention-days: 14
+          name: datawizard-release-${{ steps.tag.outputs.tag }}
+          path: |
+            release/*
           if-no-files-found: error
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            release/*.msi
-            release/*.exe
-            release/DataWizard.msix
-            release/DataWizard-Test.cer
-            release/README-MSIX.txt
-            release/data-wizard-*-windows-portable.zip
-            release/SHASUMS256.txt
+      - name: Attach artifacts to the tag release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          gh release create $tag --title "Data Wizard $tag" --generate-notes --draft `
+            release\DataWizard-$tag-windows-x64-setup.exe `
+            release\DataWizard-$tag-windows-x64-portable.zip `
+            release\DataWizard-*.msix `
+            release\SHA256SUMS256.txt
