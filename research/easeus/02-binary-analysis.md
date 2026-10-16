@@ -101,3 +101,23 @@ Drive-type icon map: type 0-49 covers system/USB/partition × existing/lost × l
 - `CSysCheckMac/CSysChkMotherBoard` hardware fingerprint for licensing
 - Crash guards: DRW_Memory_Crash_{guid}, DRW_Crash_{guid}, DRW0_Mutex_610044_ChengDu single-instance
 - Language: 22 locales, `CustomTranslator`, RTL Arabic support
+
+## 10. Process orchestration (from DRW.exe + DRWService.exe RE)
+
+- **DRW.exe** (watchdog loader, 127 KB): sets single-instance mutex + crash events
+  (DRW_Crash_{guid}, DRW_Memory_Crash_{guid}), reads `config/version.ini`
+  (channelName, comeorg), registry `SOFTWARE\EASEUS\DRW` (Language, Version),
+  spawns **DRWUI.exe** and monitors it (`____---hProcess`, CrashEvent,
+  MemoryCrashEvent, watchdog restart), reports via DRWReport.exe on crash.
+- **DRWService.exe** (elevated service, 40 KB, PDB leak
+  `BitlockerReadFVEService.pdb`): named-pipe server **`\\.\Pipe\DRWBitlocker`**;
+  reads `SYSTEM\CurrentControlSet\Control\FVEAutoUnlock` + "Read FVE Server"
+  → supplies BitLocker auto-unlock keys to the UI process. CLI: /install /uninstall.
+- Full chain: DRW.exe → DRWUI.exe (Qt UI + scan controllers, ZMQ IPC to engine
+  threads/DLLs + VAPreviewListener TCP for thumbnails) → DRWService.exe (pipe)
+  + EUinApp.exe (store) + EuRepairHost.exe (repair sandbox) + EuDownloader.exe.
+
+**Implication for Data Wizard**: our Tauri architecture maps 1:1 —
+Rust core (scan engines) ↔ event-streamed UI; our "elevation via manifest"
+matches their DRWService pattern (we read disks directly as admin; no service
+needed until BitLocker support lands).
