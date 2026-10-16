@@ -19,7 +19,7 @@ jobs:
   build-sample:
     name: Format a real ReFS volume and upload it
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Create and format the VHD
         shell: pwsh
@@ -79,35 +79,42 @@ jobs:
           # of the attached volume itself: \.\R: first 128 MiB plus the
           # last 2 MiB, with a manifest carrying the volume length.
           $vol = New-Object IO.FileStream("\\.\R:", 'Open', 'Read', [IO.FileShare]::ReadWrite)
-          $buf = New-Object byte[] (4MB)
+          # Stream the whole volume to a temp file first (CopyTo runs in
+          # C#; PowerShell per-byte loops over 2 GiB would never finish),
+          # then slice head 128 MiB + tail 2 MiB from it.
+          $tmpAll = "$env:TEMP\refs-all.bin"
+          $allFs = New-Object IO.FileStream($tmpAll, 'Create', 'Write')
+          $vol.CopyTo($allFs)
+          $allFs.Close()
+          $vol.Close()
+          $total = (Get-Item $tmpAll).Length
+
           $headFs = New-Object IO.FileStream("$env:TEMP\refs-head.bin", 'Create', 'Write')
-          $tail = New-Object System.Collections.Generic.List[byte]
-          $tailCap = [int](2MB)
-          $pos = 0L
-          $total = 0L
-          while ($true) {
-            $vol.Position = $pos
-            $n = $vol.Read($buf, 0, $buf.Length)
+          $inFs = New-Object IO.FileStream($tmpAll, 'Open', 'Read')
+          $buf = New-Object byte[] (4MB)
+          $left = [Math]::Min([int](128MB), $total)
+          while ($left -gt 0) {
+            $take = [Math]::Min($buf.Length, $left)
+            $n = $inFs.Read($buf, 0, $take)
             if ($n -le 0) { break }
-            if ($total -lt 128MB) {
-              $take = [Math]::Min($n, [int](128MB - $total))
-              $headFs.Write($buf, 0, $take)
-              if ($n -gt $take) {
-                for ($i = $take; $i -lt $n; $i++) { $tail.Add($buf[$i]) }
-                while ($tail.Count -gt $tailCap) { $tail.RemoveRange(0, $tail.Count - $tailCap) }
-              }
-            } else {
-              for ($i = 0; $i -lt $n; $i++) { $tail.Add($buf[$i]) }
-              while ($tail.Count -gt $tailCap) { $tail.RemoveRange(0, $tail.Count - $tailCap) }
-            }
-            $total += $n
-            $pos += $n
-            if ($total -gt 4GB) { break }
+            $headFs.Write($buf, 0, $n)
+            $left -= $n
           }
           $headFs.Close()
-          $vol.Close()
-          [IO.File]::WriteAllBytes("$env:TEMP\refs-tail.bin", $tail.ToArray())
-          $tail = $null
+
+          $tailWant = [Math]::Min([int](2MB), $total)
+          $inFs.Position = $total - $tailWant
+          $tailFs = New-Object IO.FileStream("$env:TEMP\refs-tail.bin", 'Create', 'Write')
+          while ($tailWant -gt 0) {
+            $take = [Math]::Min($buf.Length, $tailWant)
+            $n = $inFs.Read($buf, 0, $take)
+            if ($n -le 0) { break }
+            $tailFs.Write($buf, 0, $n)
+            $tailWant -= $n
+          }
+          $tailFs.Close()
+          $inFs.Close()
+          Remove-Item $tmpAll -Force
 
           @{ volume_bytes = $total; head_bytes = 128MB; tail_bytes = 2MB } |
             ConvertTo-Json | Set-Content "$env:TEMP\refs-manifest.json"
