@@ -39,7 +39,13 @@ fn scan_all(img: &[u8], mode: ScanMode) -> Vec<dw_core::results::RecoveredEntry>
     rt.block_on(async {
         let (src, _t) = volume(img);
         RefsPlugin
-            .scan(src, mode, store.clone(), no_progress(), Arc::new(AtomicBool::new(false)))
+            .scan(
+                src,
+                mode,
+                store.clone(),
+                no_progress(),
+                Arc::new(AtomicBool::new(false)),
+            )
             .await
             .expect("refs scan");
     });
@@ -64,7 +70,9 @@ fn probe_accepts_synthetic_volume() {
     let img = build_volume();
     let rt = Runtime::new().expect("rt");
     let (src, _t) = volume(&img);
-    let outcome = rt.block_on(async { RefsPlugin.probe(src.as_ref()).await }).unwrap();
+    let outcome = rt
+        .block_on(async { RefsPlugin.probe(src.as_ref()).await })
+        .unwrap();
     match outcome {
         ProbeOutcome::Yes(p) => {
             assert_eq!(p.fs_kind, "refs");
@@ -92,7 +100,12 @@ fn quick_pass_finds_live_files() {
     assert_eq!(inner.mtime.map(|t| t.unix_timestamp()), Some(1_600_000_000));
 
     // both live; count matches the fixture
-    assert_eq!(entries.len(), 2, "{:?}", entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>());
+    assert_eq!(
+        entries.len(),
+        2,
+        "{:?}",
+        entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -111,11 +124,62 @@ fn deep_pass_surfaces_old_generation() {
     assert_eq!(entries.iter().filter(|e| e.name == "gone.live").count(), 1);
 }
 
+/// A structurally valid minimal JPEG (same construction the ext4
+/// integration uses), used to prove deep-pass content carving.
+fn minimal_jpeg() -> Vec<u8> {
+    let mut jpg = vec![0xFF, 0xD8];
+    jpg.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x10]);
+    jpg.extend_from_slice(&[0x00; 14]);
+    jpg.extend_from_slice(&[0xFF, 0xDB, 0x00, 0x45]);
+    jpg.extend_from_slice(&[0x11; 67]);
+    jpg.extend_from_slice(&[0xFF, 0xC0, 0x00, 0x11]);
+    jpg.extend_from_slice(&[0x22; 15]);
+    jpg.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x0C]);
+    jpg.extend_from_slice(&[0x33; 10]);
+    jpg.extend_from_slice(&vec![0x55u8; 3000]);
+    jpg.extend_from_slice(&[0xFF, 0xD9]);
+    jpg
+}
+
+#[test]
+fn deep_pass_carves_content_from_headless_regions() {
+    let mut img = build_volume();
+    // Deleted content in a headless (non-headed) cluster.
+    let jpg = minimal_jpeg();
+    img[0x40000..0x40000 + jpg.len()].copy_from_slice(&jpg);
+
+    let entries = scan_all(&img, ScanMode::Deep);
+    let carved: Vec<_> = entries.iter().filter(|e| e.extension == "jpg").collect();
+    assert!(
+        !carved.is_empty(),
+        "deep pass must carve the deleted JPEG content"
+    );
+    for j in &carved {
+        assert_eq!(j.status, dw_core::results::RecoveryStatus::CarvedValidated);
+        assert!(j.extents.iter().all(|x| x.start_byte >= 0x40000));
+    }
+}
+
+#[test]
+fn quick_pass_runs_no_carving() {
+    let mut img = build_volume();
+    let jpg = minimal_jpeg();
+    img[0x40000..0x40000 + jpg.len()].copy_from_slice(&jpg);
+
+    let entries = scan_all(&img, ScanMode::Quick);
+    assert!(
+        entries.iter().all(|e| e.extension != "jpg"),
+        "quick pass must not carve content"
+    );
+}
+
 #[test]
 fn non_refs_volume_rejected() {
     let img = vec![0x41u8; 1 << 20];
     let rt = Runtime::new().expect("rt");
     let (src, _t) = volume(&img);
-    let outcome = rt.block_on(async { RefsPlugin.probe(src.as_ref()).await }).unwrap();
+    let outcome = rt
+        .block_on(async { RefsPlugin.probe(src.as_ref()).await })
+        .unwrap();
     assert!(matches!(outcome, ProbeOutcome::No), "{outcome:?}");
 }

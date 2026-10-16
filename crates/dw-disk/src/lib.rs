@@ -15,6 +15,8 @@ pub mod geometry;
 pub mod partition;
 pub mod source;
 #[cfg(windows)]
+pub mod windows_enum;
+#[cfg(windows)]
 pub mod windows_raw;
 
 pub use error::{DiskError, DiskResult};
@@ -23,3 +25,9 @@ pub use geometry::{
 };
 pub use partition::{DiscoveredTable, PartitionEntry, discover_partitions};
 pub use source::{DiskSource, FileBackedSource, PartitionView, ReadAt};
+
+#[cfg(windows)]
+pub use windows_enum::{
+    PhysicalDriveInfo, StorageBus, VolumeEntry, VolumeKind, enumerate_physical_drives,
+    enumerate_volumes, has_raw_disk_access,
+};

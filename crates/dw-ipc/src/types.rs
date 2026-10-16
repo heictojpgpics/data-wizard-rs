@@ -12,6 +12,17 @@ pub struct DiskInfo {
     pub id: String,
     pub display_name: String,
     pub size_bytes: u64,
+    /// Free bytes summed over the mounted volumes on this disk, when
+    /// known (physical drives with mounted filesystem volumes).
+    #[serde(default)]
+    pub free_bytes: Option<u64>,
+    /// Hardware model string (e.g. `Samsung SSD 970 EVO 1TB`), when the
+    /// storage stack reports one.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Device serial number, when reported.
+    #[serde(default)]
+    pub serial: Option<String>,
     pub is_removable: bool,
     pub is_system: bool,
     pub bus_type: BusType,
@@ -36,6 +47,9 @@ pub struct PartitionInfo {
     pub index: u32,
     pub offset_bytes: u64,
     pub size_bytes: u64,
+    /// Free bytes on the volume mounted at this partition, when one is.
+    #[serde(default)]
+    pub free_bytes: Option<u64>,
     pub fs_kind: Option<String>,
     pub label: Option<String>,
     pub drive_letter: Option<String>,

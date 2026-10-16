@@ -89,21 +89,93 @@ impl FsPlugin for HfsPlugin {
             })
             .await;
 
-        let outcome = walker::walk_catalog(read_at.as_ref(), &vh, &results, &progress, scan_id)?;
+        // Extents-overflow B-tree: completes live files beyond inline
+        // coverage (both modes) and supplies the deep pass's orphaned
+        // fragments.
+        let overflow_records =
+            crate::extents::walk_overflow(read_at.as_ref(), &vh).unwrap_or_else(|e| {
+                warn!(error = %e, "extents-overflow walk failed; inline coverage only");
+                Vec::new()
+            });
+        let overflow = crate::extents::overflow_map(&overflow_records);
+
+        let outcome = walker::walk_catalog_with_overflow(
+            read_at.as_ref(),
+            &vh,
+            &results,
+            &progress,
+            scan_id,
+            &overflow,
+        )?;
 
         if mode == ScanMode::Deep {
+            // Orphaned overflow fragments: fork ids with no catalog
+            // record are deleted files whose extents are still indexed.
+            let mut orphaned = 0u64;
+            for (fork_id, extents) in &overflow {
+                if *fork_id < crate::volumeheader::cnid::USER_FIRST {
+                    continue; // the volume's own metadata forks
+                }
+                if outcome.live_file_ids.contains(fork_id) {
+                    continue; // still live: already completed above
+                }
+                let bs = u64::from(vh.block_size);
+                let extent_list: Vec<dw_core::Extent> = extents
+                    .iter()
+                    .map(|e| dw_core::Extent {
+                        start_byte: u64::from(e.start_block) * bs,
+                        length: u64::from(e.block_count) * bs,
+                    })
+                    .collect();
+                let size: u64 = extent_list.iter().map(|e| e.length).sum();
+                if size == 0 {
+                    continue;
+                }
+                let _ = results.insert(dw_core::RecoveredEntry {
+                    id: dw_core::RecoveredEntryId(uuid::Uuid::now_v7()),
+                    fs_kind: if vh.signature == 0x4858 {
+                        "hfsx"
+                    } else {
+                        "hfs+"
+                    }
+                    .to_string(),
+                    parent_path: "/".to_string(),
+                    // No catalog record survives: the CNID is the only
+                    // name the evidence supports (same policy as the
+                    // ext engine's orphan inodes).
+                    name: format!("cnid_{fork_id}"),
+                    size,
+                    start_lba: extent_list.first().map(|e| e.start_byte / 512),
+                    mtime: None,
+                    ctime: None,
+                    atime: None,
+                    status: dw_core::RecoveryStatus::PartiallyRecovered,
+                    extension: String::new(),
+                    mime: None,
+                    confidence: 800,
+                    was_deleted: true,
+                    cluster_chain: extents.iter().map(|e| u64::from(e.start_block)).collect(),
+                    extents: extent_list,
+                    resident_data: None,
+                });
+                orphaned += 1;
+            }
+            if orphaned > 0 {
+                info!(orphaned, "HFS+ orphaned overflow fragments surfaced");
+            }
+
             let carved =
                 deep_carve_free_blocks(&source, &vh, &results, &progress, scan_id, &cancel)
                     .await
                     .unwrap_or(0);
             info!(
                 entries = outcome.entries,
-                carved, "HFS+ deep scan complete (catalog + carving)"
+                carved, "HFS+ deep scan complete (catalog + overflow + carving)"
             );
         } else {
             info!(
                 entries = outcome.entries,
-                "HFS+ quick scan complete (catalog only)"
+                "HFS+ quick scan complete (catalog + overflow completion)"
             );
         }
 

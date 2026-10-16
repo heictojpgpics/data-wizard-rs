@@ -181,8 +181,11 @@ impl Scan {
     ///    runs carving (the plugin handles this internally).
     /// 4. Finalizing — mark the scan as Done.
     ///
-    /// If no plugin claims the source, we fall back to raw carving
-    /// (TODO — not yet implemented).
+    /// If no plugin claims the source, the scan completes with no
+    /// entries; the app layer then runs the raw-carving fallback
+    /// (header/footer + bifragment + structured + fragment-map passes,
+    /// mirroring the reference product's RAWSearchDLL role) — dw-core
+    /// itself stays free of dw-carver (layering: carver depends on core).
     pub async fn run(self) -> CoreResult<ScanOutcome> {
         let mode = self.handle.config().mode;
 

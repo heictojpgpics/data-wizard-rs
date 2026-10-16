@@ -39,6 +39,10 @@ pub struct WalkOutcome {
     pub folders: u64,
     pub leaves_walked: u32,
     pub records: u32,
+    /// CNIDs of the files emitted from the catalog (live). The deep
+    /// pass uses this to tell orphaned overflow fragments from forks
+    /// that are still live.
+    pub live_file_ids: std::collections::HashSet<u32>,
 }
 
 /// Hard cap on nodes per walk (guards against corrupt chains).
@@ -85,6 +89,21 @@ pub fn walk_catalog(
     results: &Arc<ResultsStore>,
     progress: &Arc<dyn ProgressSink>,
     scan_id: Uuid,
+) -> CoreResult<WalkOutcome> {
+    walk_catalog_with_overflow(read_at, vh, results, progress, scan_id, &Default::default())
+}
+
+/// [`walk_catalog`] with the extents-overflow map (see
+/// [`crate::extents::overflow_map`]): files whose data fork exceeds the
+/// inline extent coverage are completed with their overflow extents
+/// instead of staying `PartiallyRecovered`.
+pub fn walk_catalog_with_overflow(
+    read_at: &dyn ReadAt,
+    vh: &VolumeHeader,
+    results: &Arc<ResultsStore>,
+    progress: &Arc<dyn ProgressSink>,
+    scan_id: Uuid,
+    overflow: &std::collections::HashMap<u32, Vec<crate::volumeheader::ForkExtent>>,
 ) -> CoreResult<WalkOutcome> {
     let geometry = read_catalog_geometry(read_at, vh)
         .map_err(|e| dw_core::CoreError::Plugin(format!("catalog geometry: {e}")))?;
@@ -213,7 +232,23 @@ pub fn walk_catalog(
         let (parent_path, name) = split_path(&full_path);
 
         let size = data_fork.logical_size;
-        let extent_pairs = crate::catalog::fork_extents_to_bytes(vh.block_size, data_fork, size);
+        // Complete the fork with its overflow extents when the inline
+        // coverage falls short (TN1150: forks beyond 8 extents continue
+        // in the extents-overflow B-tree).
+        let full_extents = crate::extents::fork_extents_with_overflow(
+            &data_fork.extents,
+            overflow.get(file_id),
+            vh.block_size,
+            size,
+        );
+        let completed_fork = crate::volumeheader::ForkData {
+            logical_size: data_fork.logical_size,
+            clump_size: data_fork.clump_size,
+            total_blocks: data_fork.total_blocks,
+            extents: full_extents,
+        };
+        let extent_pairs =
+            crate::catalog::fork_extents_to_bytes(vh.block_size, &completed_fork, size);
         let covered: u64 = extent_pairs.iter().map(|e| e.1).sum();
         let extents: Vec<Extent> = extent_pairs
             .iter()
@@ -264,6 +299,7 @@ pub fn walk_catalog(
         entry.recompute_start_lba();
         results.insert(entry);
         outcome.entries += 1;
+        outcome.live_file_ids.insert(*file_id);
     }
     outcome.folders = folders.len() as u64;
 

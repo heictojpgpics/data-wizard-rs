@@ -332,6 +332,54 @@ pub async fn walk_mft(
             None => (0, Vec::new(), Vec::new(), None, false),
         };
 
+        // $ATTRIBUTE_LIST: when the base record's $DATA is missing or
+        // partial, follow the list into the extension records and merge
+        // their run lists (in VCN order). Files too fragmented for one
+        // MFT record recover fully instead of truncating at the first
+        // record's coverage.
+        let (file_size, cluster_chain, extents, resident_data, is_partial) =
+            if let Some(list_attr) = record
+                .attributes
+                .iter()
+                .find(|a| a.attr_type == crate::mft::attr_type::ATTRIBUTE_LIST)
+            {
+                let followed = list_attr
+                    .resident_content()
+                    .and_then(|c| crate::attribute::parse_attribute_list(c).ok())
+                    .and_then(|entries| {
+                        crate::attribute::merge_attribute_list_data(
+                            &record,
+                            &entries,
+                            read_at.as_ref(),
+                            &run_boundaries,
+                            mft_offset,
+                            record_size,
+                        )
+                        .ok()
+                    });
+                match followed {
+                    Some(merged) if merged.extension_records > 0 && !merged.runs.is_empty() => {
+                        let chain: Vec<u64> = merged.runs.iter().filter_map(|r| r.offset).collect();
+                        let extents = ntfs_extents_from_runs(
+                            &merged.runs,
+                            u64::from(vbr.bytes_per_cluster),
+                            merged.real_size,
+                        );
+                        let covered: u64 = extents.iter().map(|e| e.length).sum();
+                        let is_partial = covered < merged.real_size || resident_data.is_some();
+                        let size = if merged.real_size > 0 {
+                            merged.real_size
+                        } else {
+                            file_size
+                        };
+                        (size, chain, extents, None, is_partial)
+                    }
+                    _ => (file_size, cluster_chain, extents, resident_data, is_partial),
+                }
+            } else {
+                (file_size, cluster_chain, extents, resident_data, is_partial)
+            };
+
         // Capture $Bitmap (record 6) for the deep phase.
         let is_bitmap_record = record_number == 6;
         if is_bitmap_record {

@@ -58,7 +58,12 @@ function PartitionRow({
         <span className="dw-part-fs">{fs}</span>
         {part.is_system && <span className="dw-part-badge">System</span>}
       </div>
-      <span className="dw-part-size">{formatBytes(part.size_bytes)}</span>
+      <span className="dw-part-size">
+        {formatBytes(part.size_bytes)}
+        {part.free_bytes != null && (
+          <span className="dw-part-free"> · {formatBytes(part.free_bytes)} free</span>
+        )}
+      </span>
       <div className="dw-part-actions">
         <button
           className="dw-btn-ghost"
@@ -98,6 +103,25 @@ function PartitionRow({
   );
 }
 
+function DiskUsageBar({ disk }: { disk: DiskInfo }) {
+  if (disk.free_bytes == null || disk.size_bytes === 0) return null;
+  const used = Math.max(0, disk.size_bytes - disk.free_bytes);
+  const pct = Math.min(100, Math.round((used / disk.size_bytes) * 100));
+  return (
+    <span className="dw-usage">
+      <span className="dw-usage-track" role="presentation">
+        <span
+          className={`dw-usage-fill${pct > 90 ? " dw-usage-critical" : ""}`}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="dw-usage-text">
+        {formatBytes(disk.free_bytes)} free of {formatBytes(disk.size_bytes)}
+      </span>
+    </span>
+  );
+}
+
 function DiskCard({ disk, onScan }: { disk: DiskInfo; onScan: Props["onScan"] }) {
   const [open, setOpen] = useState(false);
   const hasParts = disk.partitions.length > 0;
@@ -122,6 +146,7 @@ function DiskCard({ disk, onScan }: { disk: DiskInfo; onScan: Props["onScan"] })
             {formatBytes(disk.size_bytes)} · {busLabel(disk.bus_type)}
             {hasParts && ` · ${disk.partitions.length} partition${disk.partitions.length === 1 ? "" : "s"}`}
           </span>
+          <DiskUsageBar disk={disk} />
         </span>
         {hasParts && (
           <span className={`dw-disk-caret${open ? " dw-open" : ""}`}>

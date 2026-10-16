@@ -40,9 +40,13 @@ impl FsPlugin for RefsPlugin {
                     volume_serial: Some(format!("{:016x}", b.serial)),
                     total_bytes: total,
                     cluster_size: b.cluster_size(),
-                    estimated_quick_seconds: Some((total / (40 * 1024 * 1024)).try_into().unwrap_or(u32::MAX)),
+                    estimated_quick_seconds: Some(
+                        (total / (40 * 1024 * 1024)).try_into().unwrap_or(u32::MAX),
+                    ),
                     estimated_deep_seconds: Some(
-                        (total / (40 * 1024 * 1024) * 2).try_into().unwrap_or(u32::MAX),
+                        (total / (40 * 1024 * 1024) * 2)
+                            .try_into()
+                            .unwrap_or(u32::MAX),
                     ),
                 };
                 Ok(ProbeOutcome::Yes(probe))

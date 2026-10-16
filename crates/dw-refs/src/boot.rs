@@ -34,7 +34,9 @@ pub struct BootSector {
 impl BootSector {
     pub fn parse(vol: &[u8]) -> RefsResult<BootSector> {
         if vol.len() < 512 {
-            return Err(RefsError::TooSmall { size: vol.len() as u64 });
+            return Err(RefsError::TooSmall {
+                size: vol.len() as u64,
+            });
         }
         if &vol[0x03..0x07] != MAGIC_REFS || &vol[0x10..0x14] != MAGIC_FSRS {
             return Err(RefsError::NotRefs);

@@ -36,7 +36,8 @@ pub fn filetime(v: u64) -> Option<OffsetDateTime> {
     // FILETIME = 100ns ticks since 1601-01-01; convert to unix nanos.
     let unix = (v / 10_000_000) as i64 - 11_644_473_600;
     let nanos = ((v % 10_000_000) * 100) as u32;
-    OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix) * 1_000_000_000 + i128::from(nanos)).ok()
+    OffsetDateTime::from_unix_timestamp_nanos(i128::from(unix) * 1_000_000_000 + i128::from(nanos))
+        .ok()
 }
 
 /// A parsed name record.
@@ -44,6 +45,8 @@ pub fn filetime(v: u64) -> Option<OffsetDateTime> {
 pub struct NameRecord {
     pub id: u64,
     pub name: String,
+    /// Total bytes consumed on disk (header + UTF-16 name).
+    pub record_len: usize,
 }
 
 /// A parsed file-info record.
@@ -81,7 +84,9 @@ pub fn parse_name_record(buf: &[u8], off: usize) -> Option<NameRecord> {
     }
     let raw = &buf[off + 0x2c..name_end];
     let name = String::from_utf16(
-        raw.chunks_exact(2)
+        raw.as_chunks::<2>()
+            .0
+            .iter()
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect::<Vec<u16>>()
             .as_slice(),
@@ -90,10 +95,17 @@ pub fn parse_name_record(buf: &[u8], off: usize) -> Option<NameRecord> {
     if name.len() < 2 || name.len() > 64 {
         return None;
     }
-    if !name.chars().all(|c| c.is_alphanumeric() || matches!(c, ' ' | '.' | '-' | '_' | '(' | ')' | '~')) {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '.' | '-' | '_' | '(' | ')' | '~'))
+    {
         return None;
     }
-    Some(NameRecord { id, name })
+    Some(NameRecord {
+        id,
+        name,
+        record_len: 0x2c + b as usize,
+    })
 }
 
 /// Try to parse a file-info record at `off` (0xa8 bytes).
@@ -106,7 +118,9 @@ pub fn parse_fileinfo(buf: &[u8], off: usize) -> Option<FileInfoRecord> {
         return None;
     }
     let g = |o: usize| -> Option<u64> {
-        Some(u64::from_le_bytes(buf[off + o..off + o + 8].try_into().ok()?))
+        Some(u64::from_le_bytes(
+            buf[off + o..off + o + 8].try_into().ok()?,
+        ))
     };
     let id = g(0x80)?;
     if !(1..=65535).contains(&id) {

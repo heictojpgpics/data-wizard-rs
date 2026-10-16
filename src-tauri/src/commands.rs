@@ -212,15 +212,15 @@ pub async fn start_scan(
                         };
                         if let Ok(src) = open_source(&source_path) {
                             let size = dw_disk::ReadAt::size(src.as_read_at().as_ref());
-                            let db = dw_signatures::SignatureDb::from_embedded();
+                            let db = std::sync::Arc::new(dw_signatures::SignatureDb::from_embedded());
                             let read_at = src.as_read_at();
                             warn!(scan_id = %scan_id, size, "Raw-carving fallback (unknown filesystem)");
                             carved_fallback = dw_carver::header_footer::carve_region_async(
-                                read_at,
+                                read_at.clone(),
                                 0,
                                 size,
-                                std::sync::Arc::new(db),
-                                results,
+                                db.clone(),
+                                results.clone(),
                                 Arc::new(crate::progress_sink::TauriProgressSink::new(
                                     app, scan_id,
                                 )),
@@ -229,6 +229,58 @@ pub async fn start_scan(
                             )
                             .await
                             .ok();
+
+                            // Deep-mode strategy passes over the same
+                            // region: bifragment gap reassembly, EOCD-
+                            // backward ZIP recovery, scattered-chunk
+                            // map carving. Sync engines on the blocking
+                            // pool; the cancel flag is shared.
+                            let cancel_flag = cancel.clone();
+                            let extra = tokio::task::spawn_blocking(move || {
+                                let mut n: u64 = 0;
+                                let read = read_at.as_ref();
+                                let bifrag = dw_carver::bifragment::carve_bifragment_region(
+                                    read,
+                                    0,
+                                    size,
+                                    &db,
+                                    &results,
+                                    Some(&cancel_flag),
+                                    &dw_carver::bifragment::BifragmentParams::default(),
+                                )
+                                .unwrap_or(0);
+                                let structured = dw_carver::structured::carve_structured_region(
+                                    read,
+                                    0,
+                                    size,
+                                    &results,
+                                    Some(&cancel_flag),
+                                )
+                                .unwrap_or(0);
+                                let frag = dw_carver::fragment::carve_fragment_region(
+                                    read,
+                                    0,
+                                    size,
+                                    &results,
+                                    Some(&cancel_flag),
+                                    &dw_carver::fragment::FragmentParams::default(),
+                                )
+                                .unwrap_or(0);
+                                if bifrag + structured + frag > 0 {
+                                    info!(
+                                        scan_id = %scan_id,
+                                        bifrag,
+                                        structured,
+                                        frag,
+                                        "Deep carving strategy passes"
+                                    );
+                                }
+                                n += bifrag + structured + frag;
+                                n
+                            })
+                            .await
+                            .unwrap_or(0);
+                            carved_fallback = carved_fallback.map(|c| c + extra);
                             // Cancellation from the raw-carve path: honor it.
                             if cancel.load(std::sync::atomic::Ordering::Relaxed) {
                                 let g = state_clone.read();
@@ -772,6 +824,24 @@ pub async fn list_partitions(
         dw_disk::DiscoveredTable::None => Vec::new(),
     };
 
+    // Volume attachment (drive letters + free space) for physical-drive
+    // sources — the same mapping list_disks applies, so both views of a
+    // disk agree.
+    #[cfg(windows)]
+    let (drive_index, volumes) = {
+        let s = path.to_string_lossy();
+        let drive_index = s
+            .rsplit("PhysicalDrive")
+            .next()
+            .and_then(|n| n.parse::<u32>().ok());
+        let volumes = if drive_index.is_some() {
+            dw_disk::enumerate_volumes()
+        } else {
+            Vec::new()
+        };
+        (drive_index, volumes)
+    };
+
     let mut partitions = Vec::with_capacity(entries.len());
     for e in &entries {
         // Probe the filesystem by opening a view of this partition.
@@ -779,14 +849,46 @@ pub async fn list_partitions(
             Ok(view) => probe_partition_fs(&view).await,
             Err(_) => None,
         };
+
+        #[cfg(windows)]
+        let (drive_letter, free_bytes, label, part_is_windows) = {
+            let part_end = e.offset_bytes.saturating_add(e.size_bytes);
+            let volume = volumes.iter().find(|v| {
+                v.disk_number == drive_index
+                    && v.extent_start.is_some_and(|s| s >= e.offset_bytes)
+                    && v
+                        .extent_start
+                        .zip(v.extent_len)
+                        .is_some_and(|(s, l)| s.saturating_add(l) <= part_end)
+            });
+            match volume {
+                Some(v) => {
+                    let letter = format!("{}:", v.letter);
+                    (
+                        Some(letter.clone()),
+                        v.free_bytes,
+                        v.label
+                            .clone()
+                            .filter(|l| !l.trim().is_empty())
+                            .or_else(|| e.label.clone()),
+                        is_system_drive(&letter),
+                    )
+                }
+                None => (None, None, e.label.clone(), false),
+            }
+        };
+        #[cfg(not(windows))]
+        let (drive_letter, free_bytes, label, part_is_windows) = (None, None, e.label.clone(), false);
+
         partitions.push(dto::PartitionInfo {
             index: e.index,
             offset_bytes: e.offset_bytes,
             size_bytes: e.size_bytes,
+            free_bytes,
             fs_kind,
-            label: e.label.clone(),
-            drive_letter: None,
-            is_system: e.type_name == "EFI System Partition",
+            label,
+            drive_letter,
+            is_system: e.type_name == "EFI System Partition" || part_is_windows,
         });
     }
 
@@ -799,8 +901,11 @@ pub async fn list_partitions(
 
 /// Enumerate available disks.
 ///
-/// On Windows: physical drives plus volume letters.
-/// On other platforms, returns an empty list (the UI supports file-backed images).
+/// On Windows: physical drives with partition layouts, hardware
+/// models, bus classification and mounted-volume free space, plus
+/// drive-letter volumes that do not map onto an enumerated physical
+/// drive (network drives, dynamic-disk volumes). On other platforms
+/// returns an empty list (the UI supports file-backed images).
 fn enumerate_disks() -> Vec<dto::DiskInfo> {
     #[cfg(windows)]
     {
@@ -812,106 +917,186 @@ fn enumerate_disks() -> Vec<dto::DiskInfo> {
     }
 }
 
+/// The `--diagnostics` self-check channel: the exact disk list the UI
+/// gets, callable without a Tauri app handle.
+pub fn enumerate_disks_public() -> Vec<dto::DiskInfo> {
+    enumerate_disks()
+}
+
+/// Map the dw-disk storage-bus classification onto the wire enum.
+#[cfg(windows)]
+fn bus_type_of(bus: dw_disk::StorageBus) -> dto::BusType {
+    use dw_disk::StorageBus;
+    match bus {
+        StorageBus::Sata | StorageBus::Ata | StorageBus::Sas => dto::BusType::Sata,
+        StorageBus::Nvme => dto::BusType::Nvme,
+        StorageBus::Usb => dto::BusType::Usb,
+        StorageBus::Sd => dto::BusType::Sd,
+        StorageBus::Mmc => dto::BusType::Mmc,
+        StorageBus::Virtual | StorageBus::Raid => dto::BusType::Virtual,
+        StorageBus::IScsi => dto::BusType::IScsi,
+        StorageBus::FibreChannel => dto::BusType::FibreChannel,
+        StorageBus::FireWire | StorageBus::Unknown => dto::BusType::Unknown,
+    }
+}
+
 #[cfg(windows)]
 fn enumerate_disks_windows() -> Vec<dto::DiskInfo> {
-    use dw_disk::windows_raw::WindowsRawSource;
+    use dw_disk::{enumerate_physical_drives, enumerate_volumes, PartitionEntry};
 
+    let drives = enumerate_physical_drives();
+    let volumes = enumerate_volumes();
+    // Bus lookup for standalone volume entries.
+    let bus_by_index: std::collections::HashMap<u32, dto::BusType> = drives
+        .iter()
+        .map(|d| (d.index, bus_type_of(d.bus)))
+        .collect();
+    // Letters already nested under a partition of an enumerated disk.
+    let mut mapped_letters: Vec<String> = Vec::new();
     let mut disks = Vec::new();
 
-    // Physical drives: \\.\PhysicalDrive0..N. Opening failures (index
-    // gaps / permissions) are skipped silently.
-    for n in 0..64u32 {
-        let path = format!("\\\\.\\PhysicalDrive{n}");
-        let Ok(source) = WindowsRawSource::open(std::path::Path::new(&path)) else {
-            continue;
-        };
-        let read_at = source.as_read_at();
-        let size = dw_disk::ReadAt::size(read_at.as_ref());
-        if size == 0 {
-            continue;
-        }
+    for drive in &drives {
+        // Partition discovery needs read access to the raw device. A
+        // refusal (rare with the elevation manifest; possible for some
+        // virtual controllers) still yields a size-correct entry.
+        let entries: Vec<PartitionEntry> = dw_disk::windows_raw::WindowsRawSource::open(
+            std::path::Path::new(&drive.path),
+        )
+        .ok()
+        .and_then(|src| {
+            let read_at = src.as_read_at();
+            dw_disk::discover_partitions(read_at.as_ref()).ok()
+        })
+        .map(|table| match table {
+            dw_disk::DiscoveredTable::Gpt { entries, .. } => entries,
+            dw_disk::DiscoveredTable::Mbr { entries } => entries,
+            dw_disk::DiscoveredTable::None => Vec::new(),
+        })
+        .unwrap_or_default();
 
-        // Discover the partition layout (MBR + EBR chains / GPT with CRC
-        // validation). On corrupt tables, report the disk with no
-        // partitions rather than dropping it.
-        let table = dw_disk::discover_partitions(read_at.as_ref()).ok();
-        let entries = match &table {
-            Some(dw_disk::DiscoveredTable::Gpt { entries, .. }) => entries.clone(),
-            Some(dw_disk::DiscoveredTable::Mbr { entries }) => entries.clone(),
-            _ => Vec::new(),
-        };
+        let mut partitions = Vec::with_capacity(entries.len());
+        let mut disk_free: u64 = 0;
+        let mut hosts_windows = false;
+        let mut has_efi = false;
 
-        let partitions: Vec<dto::PartitionInfo> = entries
-            .iter()
-            .map(|e| dto::PartitionInfo {
+        for e in &entries {
+            let efi = e.type_name == "EFI System Partition";
+            if efi {
+                has_efi = true;
+            }
+            // Attach the volume whose extent falls inside this
+            // partition (basic disks: one extent per volume).
+            let part_end = e.offset_bytes.saturating_add(e.size_bytes);
+            let volume = volumes.iter().find(|v| {
+                v.disk_number == Some(drive.index)
+                    && v.extent_start.is_some_and(|s| s >= e.offset_bytes)
+                    && v
+                        .extent_start
+                        .zip(v.extent_len)
+                        .is_some_and(|(s, l)| s.saturating_add(l) <= part_end)
+            });
+
+            let (drive_letter, free_bytes, label) = match volume {
+                Some(v) => {
+                    mapped_letters.push(v.letter.clone());
+                    (
+                        Some(format!("{}:", v.letter)),
+                        v.free_bytes,
+                        v.label
+                            .clone()
+                            .filter(|l| !l.trim().is_empty())
+                            .or_else(|| e.label.clone()),
+                    )
+                }
+                None => (None, None, e.label.clone()),
+            };
+            if let Some(free) = free_bytes {
+                disk_free = disk_free.saturating_add(free);
+            }
+            let part_is_windows = drive_letter.as_deref().is_some_and(is_system_drive);
+            if part_is_windows {
+                hosts_windows = true;
+            }
+            partitions.push(dto::PartitionInfo {
                 index: e.index,
                 offset_bytes: e.offset_bytes,
                 size_bytes: e.size_bytes,
+                free_bytes,
                 fs_kind: None, // probed on demand via list_partitions
-                label: e.label.clone(),
-                drive_letter: None,
-                is_system: e.type_name == "EFI System Partition",
-            })
-            .collect();
+                label,
+                drive_letter,
+                is_system: efi || part_is_windows,
+            });
+        }
+
+        let display_name = drive
+            .model
+            .clone()
+            .unwrap_or_else(|| format!("Physical Drive {}", drive.index));
 
         disks.push(dto::DiskInfo {
-            id: path,
-            display_name: format!("Physical Drive {n}"),
-            size_bytes: size,
-            is_removable: false, // TODO: IOCTL_STORAGE_QUERY_PROPERTY BusType
-            is_system: partitions.iter().any(|p| p.is_system),
-            bus_type: dto::BusType::Sata, // TODO: IOCTL_STORAGE_QUERY_PROPERTY
+            id: drive.path.clone(),
+            display_name,
+            size_bytes: drive.size_bytes,
+            free_bytes: if disk_free > 0 { Some(disk_free) } else { None },
+            model: drive.model.clone(),
+            serial: drive.serial.clone(),
+            is_removable: drive.removable_media,
+            is_system: has_efi || hosts_windows,
+            bus_type: bus_type_of(drive.bus),
             partitions,
         });
     }
 
-    // Volumes (drive letters) — retained so the UI can scan a volume
-    // directly without picking a partition.
-    use windows::Win32::Storage::FileSystem::GetLogicalDriveStringsW;
-    let mut buf = [0u16; 260];
-    let len = unsafe { GetLogicalDriveStringsW(Some(&mut buf)) };
-    if len == 0 {
-        return disks;
-    }
-    let strings = String::from_utf16_lossy(&buf[..len as usize]);
-    for drive_str in strings.split('\0') {
-        if drive_str.is_empty() || drive_str.len() < 2 {
+    // Drive-letter volumes that did not map onto an enumerated disk
+    // (network drives, dynamic-disk volumes, media on controllers we
+    // could not open): standalone entries so the user always sees every
+    // letter Explorer shows.
+    for v in &volumes {
+        if mapped_letters.iter().any(|m| m.eq_ignore_ascii_case(&v.letter)) {
             continue;
         }
-        let letter = &drive_str[..2]; // e.g. "C:"
-        let display_name = format!("Local Disk ({letter})");
-        let volume_path = format!("\\\\.\\{letter}");
-        let (size, removable) = match WindowsRawSource::open(std::path::Path::new(&volume_path)) {
-            Ok(src) => (
-                dw_disk::ReadAt::size(src.as_read_at().as_ref()),
-                drive_kind(&format!("{letter}\\")),
-            ),
-            Err(_) => (0, false),
+        // Authoritative size: filesystem totals when mounted, else the
+        // raw device length.
+        let size = v.total_bytes.or_else(|| {
+            dw_disk::windows_raw::WindowsRawSource::open(std::path::Path::new(&format!(
+                "\\\\.\\{}:",
+                v.letter
+            )))
+            .ok()
+            .map(|s| dw_disk::ReadAt::size(s.as_read_at().as_ref()))
+        });
+        let Some(size) = size else { continue };
+        if size == 0 {
+            continue; // no media / nothing to scan
+        }
+        let letter = format!("{}:", v.letter);
+        let removable = matches!(v.kind, dw_disk::VolumeKind::Removable | dw_disk::VolumeKind::CdRom);
+        let display_name = match (&v.label, v.kind) {
+            (Some(l), _) if !l.trim().is_empty() => format!("{l} ({letter})"),
+            (None, dw_disk::VolumeKind::Removable) => format!("Removable Disk ({letter})"),
+            (None, dw_disk::VolumeKind::CdRom) => format!("Disc Drive ({letter})"),
+            (None, dw_disk::VolumeKind::Remote) => format!("Network Drive ({letter})"),
+            _ => format!("Local Disk ({letter})"),
         };
         disks.push(dto::DiskInfo {
-            id: volume_path,
+            id: format!("\\\\.\\{letter}"),
             display_name,
             size_bytes: size,
+            free_bytes: v.free_bytes,
+            model: None,
+            serial: None,
             is_removable: removable,
-            is_system: is_system_drive(letter),
-            bus_type: dto::BusType::Sata, // TODO: IOCTL_STORAGE_QUERY_PROPERTY
+            is_system: is_system_drive(&letter),
+            bus_type: v
+                .disk_number
+                .and_then(|n| bus_by_index.get(&n).copied())
+                .unwrap_or(dto::BusType::Unknown),
             partitions: Vec::new(),
         });
     }
 
     disks
-}
-
-/// DRIVE_REMOVABLE / DRIVE_CDROM etc. via GetDriveTypeW (volume root
-/// form "C:\\").
-#[cfg(windows)]
-fn drive_kind(root: &str) -> bool {
-    const DRIVE_REMOVABLE: u32 = 2;
-    use windows::Win32::Storage::FileSystem::GetDriveTypeW;
-    use windows::core::PCWSTR;
-    let wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
-    let ty = unsafe { GetDriveTypeW(PCWSTR(wide.as_ptr())) };
-    ty == DRIVE_REMOVABLE
 }
 
 /// The system drive is where the Windows directory lives, not a hardcoded

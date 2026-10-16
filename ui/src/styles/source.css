@@ -208,6 +208,42 @@
   color: var(--text-tertiary);
 }
 
+/* Capacity usage bar (physical disks with mounted volumes). */
+.dw-usage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.dw-usage-track {
+  width: 120px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--control-border);
+  overflow: hidden;
+  flex: none;
+}
+
+.dw-usage-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ink);
+  transition: width var(--dur-base) var(--ease-out);
+}
+
+.dw-usage-fill.dw-usage-critical {
+  background: #f59e0b;
+}
+
+.dw-usage-text {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .dw-disk-caret {
   color: var(--text-tertiary);
   transition: transform var(--dur-fast) var(--ease-out);
@@ -294,6 +330,10 @@
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   flex: none;
+}
+
+.dw-part-free {
+  color: var(--text-tertiary);
 }
 
 .dw-part-actions {
