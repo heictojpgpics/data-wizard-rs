@@ -399,7 +399,9 @@ jobs:
           # asserted on the dw-tauri process itself.
           $pf = $pkg.PackageFamilyName
           Write-Host "Activating shell:AppsFolder/$pf!DataWizard"
-          Start-Process "shell:AppsFolder/$pf!DataWizard"
+          # Start-Process resolves shell: URIs as file paths; the shell
+          # activation has to go through explorer.
+          Start-Process explorer.exe -ArgumentList "shell:AppsFolder/$pf!DataWizard"
           $deadline = (Get-Date).AddSeconds(15)
           $app = $null
           while ((Get-Date) -lt $deadline) {
