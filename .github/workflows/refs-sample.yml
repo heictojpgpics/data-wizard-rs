@@ -1,0 +1,87 @@
+name: ReFS sample builder
+
+on:
+  push:
+    branches: [main, draft]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: refs-sample-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-sample:
+    name: Format a real ReFS volume and upload it
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Create and format the VHD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vhd = "$env:TEMP\test_refs.vhd"
+          $vhdScript = @"
+          create vdisk file="$vhd" maximum=512 type=expandable
+          select vdisk file="$vhd"
+          attach vdisk
+          create partition primary
+          format fs=refs label="TestReFS" quick
+          assign letter=R
+          exit
+          "@
+          $vhdScript | diskpart
+
+          fsutil fsinfo volumeinfo R:
+
+      - name: Populate the volume
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path R:\TestFiles -Force
+          New-Item -ItemType Directory -Path R:\Docs -Force | Out-Null
+
+          # 30 files with known, mappable content
+          1..30 | ForEach-Object {
+            $content = ("ReFS sample file $_ " + ("A" * 3000))
+            [IO.File]::WriteAllText("R:\TestFiles\file$_.txt", $content)
+          }
+          [IO.File]::WriteAllText("R:\Docs\notes.txt", "important document " + ("B" * 5000))
+
+          # A file with distinctive binary content for carving checks
+          $bin = New-Object byte[] 65536
+          for ($i = 0; $i -lt $bin.Length; $i++) { $bin[$i] = [byte](($i * 7) % 251) }
+          [IO.File]::WriteAllBytes("R:\Docs\pattern.bin", $bin)
+
+          # Distinct mtimes so the engine's timestamp decode is testable
+          (Get-Item R:\Docs\notes.txt).LastWriteTime = [DateTime]::new(2025, 1, 2, 3, 4, 5)
+          (Get-Item R:\Docs\pattern.bin).LastWriteTime = [DateTime]::new(2025, 6, 7, 8, 9, 10)
+
+          # Delete 15 of the 30 (deep-pass material)
+          1..15 | ForEach-Object { Remove-Item "R:\TestFiles\file$_.txt" }
+          Get-ChildItem -Recurse R:\ | Select-Object FullName, Length | Out-String | Write-Host
+
+      - name: Detach, compress and upload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vhd = "$env:TEMP\test_refs.vhd"
+          "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart | Out-Null
+          $info = Get-Item $vhd
+          Write-Host "VHD: $($info.FullName) $([math]::Round($info.Length / 1MB, 2)) MiB"
+          Compress-Archive -Path $vhd -DestinationPath refs-sample.zip
+          $sum = (Get-FileHash refs-sample.zip -Algorithm SHA256).Hash
+          "sha256 refs-sample.zip = $sum" | Write-Host
+
+      - name: Upload sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: refs-sample-vhd
+          path: refs-sample.zip
+          retention-days: 30
+          if-no-files-found: error
