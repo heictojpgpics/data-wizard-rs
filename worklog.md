@@ -1106,3 +1106,33 @@ Stage Summary:
 - Support matrix: NTFS(+attr-list), FAT12/16/32, exFAT, HFS+(+
   extents-overflow), ext2/3/4, Btrfs, ZFS, ReFS, raw carving(+
   bifragment/structured/map strategies) - all "Working, tested".
+
+---
+Task ID: 5 (session 8, follow-up 2)
+Agent: main (Super Z)
+Task: The window-controls capability fix (the silent no-op class of bug)
+
+Work Log:
+- The second screenshots run still fell back to cadence capture: the
+  TourDriver's getCurrentWindow().setTitle() was silently DENIED —
+  Tauri 2's capability system gates window setters, and core:default
+  carries only read verbs. The same denial applied to the CUSTOM
+  CAPTION BUTTONS (minimize/maximize/close no-op on click!) and the
+  drag region (my data-drag attribute was inert — the real attribute
+  is data-tauri-drag-region, and it needs
+  core:window:allow-start-dragging).
+- DiskGenie's capabilities/default.json documents the identical lesson
+  ("setSize/setFullscreen silently no-op without them") — adopted
+  their verb set for our chrome: start-dragging, toggle-maximize,
+  minimize, close, is-maximized, set-size, center, set-title,
+  set-theme, show (+ core:event:default; on-resized listeners ride
+  the event permission, not a window one — the first check caught the
+  invalid permission name).
+- TopBar now carries data-tauri-drag-region on the header/brand/
+  spacer (interactive children stay clickable).
+
+Stage Summary:
+- The custom chrome is actually functional now: caption verbs work,
+  the topbar drags the window, themes sync the native chrome, and the
+  tour's title stamps reach MainWindowTitle for the one-frame-per-step
+  capture.
