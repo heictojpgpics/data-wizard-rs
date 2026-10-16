@@ -70,61 +70,60 @@ jobs:
           1..15 | ForEach-Object { Remove-Item "R:\TestFiles\file$_.txt" }
           Get-ChildItem -Recurse R:\ | Select-Object FullName, Length | Out-String | Write-Host
 
-      - name: Dump the raw volume (no VHD file needed)
+      - name: Dump the raw volume (nonzero clusters only)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          # The VHD file handle is pinned by the stack long after detach
-          # (survives vdsldr termination), so the artifact is a raw dump
-          # of the attached volume itself: \.\R: first 128 MiB plus the
-          # last 2 MiB, with a manifest carrying the volume length.
+          # Full-fidelity, tiny artifact: stream (index u64, data 4096) for
+          # every nonzero 4 KiB cluster of the volume; the reconstruction
+          # locally rebuilds the exact image as a sparse file.
           $vol = New-Object IO.FileStream("\\.\R:", 'Open', 'Read', [IO.FileShare]::ReadWrite)
-          # Stream the whole volume to a temp file first (CopyTo runs in
-          # C#; PowerShell per-byte loops over 2 GiB would never finish),
-          # then slice head 128 MiB + tail 2 MiB from it.
-          $tmpAll = "$env:TEMP\refs-all.bin"
-          $allFs = New-Object IO.FileStream($tmpAll, 'Create', 'Write')
-          $vol.CopyTo($allFs)
-          $allFs.Close()
+          $len = 0L
+          $vol.Position = 0
+          $probe = New-Object byte[] (4MB)
+          while ($true) {
+            $n = $vol.Read($probe, 0, $probe.Length)
+            if ($n -le 0) { break }
+            $len += $n
+          }
+          Write-Host "volume length: $len"
+
+          $out = New-Object IO.FileStream("$env:TEMP\refs-nz.bin", 'Create', 'Write')
+          $zero = New-Object byte[] (4096)
+          $buf = New-Object byte[] (4096)
+          $count = 0
+          for ($off = 0L; $off -lt $len; $off += 4096) {
+            $vol.Position = $off
+            $got = 0
+            while ($got -lt 4096) {
+              $r = $vol.Read($buf, $got, 4096 - $got)
+              if ($r -le 0) { break }
+              $got += $r
+            }
+            if ($got -lt 4096) { for ($i = $got; $i -lt 4096; $i++) { $buf[$i] = 0 } }
+            $isZero = $true
+            for ($i = 0; $i -lt 4096; $i += 64) {
+              $isZero = $isZero -and ([BitConverter]::ToUInt64($buf, $i) -eq 0UL) -and ([BitConverter]::ToUInt64($buf, [Math]::Min($i + 8, 4088)) -eq 0UL)
+              if (-not $isZero) { break }
+            }
+            if (-not $isZero) {
+              $idx = [BitConverter]::GetBytes([UInt64]($off / 4096))
+              $out.Write($idx, 0, 8)
+              $out.Write($buf, 0, 4096)
+              $count++
+            }
+          }
+          $out.Close()
           $vol.Close()
-          $total = (Get-Item $tmpAll).Length
-
-          $headFs = New-Object IO.FileStream("$env:TEMP\refs-head.bin", 'Create', 'Write')
-          $inFs = New-Object IO.FileStream($tmpAll, 'Open', 'Read')
-          $buf = New-Object byte[] (4MB)
-          $left = [Math]::Min([int](128MB), $total)
-          while ($left -gt 0) {
-            $take = [Math]::Min($buf.Length, $left)
-            $n = $inFs.Read($buf, 0, $take)
-            if ($n -le 0) { break }
-            $headFs.Write($buf, 0, $n)
-            $left -= $n
-          }
-          $headFs.Close()
-
-          $tailWant = [Math]::Min([int](2MB), $total)
-          $inFs.Position = $total - $tailWant
-          $tailFs = New-Object IO.FileStream("$env:TEMP\refs-tail.bin", 'Create', 'Write')
-          while ($tailWant -gt 0) {
-            $take = [Math]::Min($buf.Length, $tailWant)
-            $n = $inFs.Read($buf, 0, $take)
-            if ($n -le 0) { break }
-            $tailFs.Write($buf, 0, $n)
-            $tailWant -= $n
-          }
-          $tailFs.Close()
-          $inFs.Close()
-          Remove-Item $tmpAll -Force
-
-          @{ volume_bytes = $total; head_bytes = 128MB; tail_bytes = 2MB } |
+          Write-Host "nonzero clusters: $count"
+          @{ volume_bytes = $len; cluster = 4096; nonzero_clusters = $count } |
             ConvertTo-Json | Set-Content "$env:TEMP\refs-manifest.json"
-          Get-Item "$env:TEMP\refs-*.bin" | Select-Object Name, Length | Out-String | Write-Host
 
       - name: Compress and upload
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Compress-Archive -Path "$env:TEMP\refs-head.bin", "$env:TEMP\refs-tail.bin", "$env:TEMP\refs-manifest.json" -DestinationPath refs-sample.zip
+          Compress-Archive -Path "$env:TEMP\refs-nz.bin", "$env:TEMP\refs-manifest.json" -DestinationPath refs-sample.zip
           $sum = (Get-FileHash refs-sample.zip -Algorithm SHA256).Hash
           "sha256 refs-sample.zip = $sum" | Write-Host
 
