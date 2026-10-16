@@ -57,7 +57,6 @@ fn all_plugins() -> Vec<Arc<dyn dw_core::FsPlugin>> {
         Arc::new(dw_ext::ExtPlugin),
         Arc::new(dw_hfs::HfsPlugin),
         Arc::new(dw_btrfs::BtrfsPlugin),
-        Arc::new(dw_refs::RefsPlugin),
         Arc::new(dw_zfs::ZfsPlugin),
     ]
 }
@@ -179,7 +178,6 @@ pub async fn start_scan(
     }
 
     let state_clone = Arc::clone(state.inner());
-    let mode = mode;
     tokio::spawn(async move {
         info!(scan_id = %scan_id, "Scan task started");
         let result = scan.run().await;
@@ -250,10 +248,10 @@ pub async fn start_scan(
             Err(e) => {
                 warn!(scan_id = %scan_id, error = %e, "Scan task failed");
                 let g = state_clone.read();
-                if let Some(record) = g.scans.get(&scan_id) {
-                    if record.handle.state() != dw_core::ScanState::Cancelled {
-                        record.handle.set_state(dw_core::ScanState::Failed);
-                    }
+                if let Some(record) = g.scans.get(&scan_id)
+                    && record.handle.state() != dw_core::ScanState::Cancelled
+                {
+                    record.handle.set_state(dw_core::ScanState::Failed);
                 }
             }
         }
@@ -409,16 +407,6 @@ pub async fn scan_stats(
                     bytes,
                 })
                 .collect(),
-            by_month: stats
-                .by_month
-                .into_iter()
-                .map(|(month, files, bytes)| dto::AgeBucketDto {
-                    month,
-                    files,
-                    bytes,
-                })
-                .collect(),
-            no_timestamp_files: stats.no_timestamp_files,
         },
     })
 }
@@ -730,10 +718,10 @@ pub async fn resume_scan(
         } else {
             warn!(scan_id = %scan_id, "Resumed scan failed");
             let g = state_clone.read();
-            if let Some(record) = g.scans.get(&scan_id) {
-                if record.handle.state() != dw_core::ScanState::Cancelled {
-                    record.handle.set_state(dw_core::ScanState::Failed);
-                }
+            if let Some(record) = g.scans.get(&scan_id)
+                && record.handle.state() != dw_core::ScanState::Cancelled
+            {
+                record.handle.set_state(dw_core::ScanState::Failed);
             }
         }
         let _ = mode;
@@ -942,4 +930,28 @@ fn is_system_drive(letter: &str) -> bool {
     windir
         .get(..2)
         .is_some_and(|root| root.eq_ignore_ascii_case(letter))
+}
+
+/// Dev hooks for the CI screenshot tour (env-var driven; harmless in
+/// production builds — nothing reads these variables unless set):
+///   DATAWIZARD_TOUR=1     the TourDriver auto-cycles every UI state.
+///   DATAWIZARD_TOUR_MODE  reserved program selector (ui default).
+///   DATAWIZARD_SCAN       optional source URI to auto-scan first.
+#[derive(Debug, Clone, serde::Serialize)]
+#[allow(clippy::struct_field_names)]
+pub struct DevHooks {
+    pub tour: bool,
+    pub tour_mode: Option<String>,
+    pub scan: Option<String>,
+}
+
+#[tauri::command]
+pub fn get_dev_hooks() -> DevHooks {
+    DevHooks {
+        tour: std::env::var("DATAWIZARD_TOUR")
+            .map(|v| v == "1")
+            .unwrap_or(false),
+        tour_mode: std::env::var("DATAWIZARD_TOUR_MODE").ok(),
+        scan: std::env::var("DATAWIZARD_SCAN").ok(),
+    }
 }

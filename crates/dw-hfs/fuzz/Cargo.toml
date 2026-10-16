@@ -1,0 +1,32 @@
+[package]
+name = "dw-hfs-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dw-hfs = { path = ".." }
+
+[[bin]]
+name = "fuzz_btree_node"
+path = "fuzz_targets/fuzz_btree_node.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_catalog_record"
+path = "fuzz_targets/fuzz_catalog_record.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_volume_header"
+path = "fuzz_targets/fuzz_volume_header.rs"
+test = false
+doc = false
+
+[workspace]

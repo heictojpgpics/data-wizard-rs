@@ -1,0 +1,125 @@
+name: Security Scan
+
+on:
+  push:
+    branches: [main, draft]
+  pull_request:
+    branches: [main, draft]
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: security-scan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit --deny warnings
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+      # The shipped artifact is a static bundle: there are no runtime npm
+      # dependencies, so auditing with --omit=dev covers what we ship.
+      - working-directory: ui
+        run: npm audit --omit=dev
+
+  winchecksec:
+    name: winchecksec
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            src-tauri/target
+      - name: Install Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: ui/package-lock.json
+      # The Tauri app embeds ../ui/dist at compile time (generate_context!),
+      # so the UI bundle must exist before building src-tauri.
+      - name: Build UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm run build
+      - name: Build release binaries
+        run: |
+          cargo build --workspace --release
+          cargo build --release --manifest-path src-tauri/Cargo.toml
+      - name: Install VC++ runtime (winchecksec dependency)
+        shell: pwsh
+        run: |
+          # winchecksec is built against vcruntime140.dll; GitHub Windows
+          # runners do not always have it. Install quietly.
+          choco install -y vcredist140 --no-progress
+      - name: Install winchecksec
+        shell: pwsh
+        run: |
+          $progressPreference = 'silentlyContinue'
+          $zip = "$env:TEMP/wcs.zip"
+          Invoke-WebRequest -Uri "https://github.com/trailofbits/winchecksec/releases/download/v3.1.0/windows.x64.Release.zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath "$env:TEMP/wcs" -Force
+          # The release zip contains a full CMake build tree with MANY
+          # exes (CompilerIdC.exe etc). The real tool is at
+          # build/Release/winchecksec.exe - pick it explicitly.
+          $exe = Join-Path "$env:TEMP/wcs" "build/Release/winchecksec.exe"
+          if (-not (Test-Path $exe)) {
+            Write-Host "winchecksec.exe not at expected path; zip contents:"
+            Get-ChildItem "$env:TEMP/wcs" -Recurse -Filter *.exe | ForEach-Object { Write-Host $_.FullName }
+            Write-Error "build/Release/winchecksec.exe missing from the release zip"
+            exit 1
+          }
+          # winchecksec's full dependency chain ships in the same release:
+          # pe-parse.dll, uthenticode.dll, and (transitively, via
+          # uthenticode) libcrypto-1_1-x64.dll. Without all of them next
+          # to the exe it dies with 0xC0000135 (STATUS_DLL_NOT_FOUND).
+          $rel = Join-Path "$env:TEMP/wcs" "build/Release"
+          Copy-Item $exe -Destination "./winchecksec.exe" -Force
+          Copy-Item "$rel/pe-parse.dll" -Destination "./pe-parse.dll" -Force
+          Copy-Item "$rel/uthenticode.dll" -Destination "./uthenticode.dll" -Force
+          Copy-Item "$rel/libcrypto-1_1-x64.dll" -Destination "./libcrypto-1_1-x64.dll" -Force
+      - name: Run winchecksec on built binaries
+        shell: pwsh
+        run: |
+          function Assert-Mitigations([string]$bin) {
+            if (-not (Test-Path $bin)) {
+              Write-Error "$bin was not built"
+              exit 1
+            }
+            $raw = .\winchecksec.exe --json $bin 2>$null | Out-String
+            Write-Host "winchecksec output for $bin : $raw"
+            if ($LASTEXITCODE -ne 0) { Write-Error "winchecksec exited with $LASTEXITCODE"; exit 1 }
+            # Warnings may precede the JSON; keep from the first '['.
+            $json = $raw.Substring($raw.IndexOf('['))
+            $m = ($json | ConvertFrom-Json)[0].mitigations
+            if ($m.aslr.presence -ne 'Present') { Write-Error "ASLR missing in $bin"; exit 1 }
+            if ($m.nx.presence -ne 'Present') { Write-Error "DEP/NX missing in $bin"; exit 1 }
+            if ($m.cfg.presence -ne 'Present') { Write-Error "CFG missing in $bin"; exit 1 }
+            Write-Host "$bin : ASLR, DEP, GS, high-entropy VA and CFG all present"
+          }
+          Assert-Mitigations "target\release\dw-scan.exe"
+          Assert-Mitigations "src-tauri\target\release\dw-tauri.exe"

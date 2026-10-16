@@ -23,7 +23,6 @@ dw-exfat     = { workspace = true }
 dw-ext       = { workspace = true }
 dw-hfs       = { workspace = true }
 dw-btrfs     = { workspace = true }
-dw-refs      = { workspace = true }
 dw-zfs       = { workspace = true }
 dw-signatures = { workspace = true }
 dw-carver     = { workspace = true }

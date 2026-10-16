@@ -14,20 +14,39 @@ See [`worklog.md`](./worklog.md) for the running work log and [`docs/`](./docs/)
 
 | Filesystem | Quick scan | Deep scan (unallocated carving) | Status |
 |---|---|---|---|
-| NTFS 3.x | MFT walk, timestamps, resident data, extents | $Bitmap-guided carve | **Working, tested** |
+| NTFS 3.x | MFT walk, timestamps, resident data, extents | $Bitmap-guided carve + $I30 names for lost records | **Working, tested** |
 | FAT12/16/32 | dir walk, FAT timestamps, extents | free-run carve | **Working, tested** |
 | exFAT | entry-set walk, timestamps, fragmentation | allocation-bitmap carve | **Working, tested** |
 | HFS+ | catalog B-tree walk, extents | free-block carve | **Working, tested** |
-| ext2/3/4 | - | - | Stub (probe says no; planned) |
-| Btrfs | - | - | Stub (probe says no; planned) |
-| ReFS | - | - | Stub (probe says no; planned) |
-| ZFS | - | - | Stub (probe says no; planned) |
+| ext2/3/4 | live walk + shadow-dirent deleted names (extent trees and indirect maps, fragmented files in content order) | orphan-inode pass + free-block carve | **Working, tested** |
+| Btrfs | live subvolume walks (checksummed nodes, non-identity chunk mapping, fragmented order, inline files) | orphan-tree-block pass (old COW generations surface with names and extents) | **Working, tested** |
+| ZFS (OpenZFS on-disk) | live tree walk from the newest uberblock: labels fletcher4-verified, MOS -> root dataset -> FS tree, SA or legacy-znode timestamps, physical extents, symlink resident data; LZJB/GZIP/ZLE/LZ4/ZSTD reads under fletcher2/fletcher4/SHA-256 verification | previous-uberblock pass (second-newest txg: recently deleted entries keep names, timestamps, extents) | **Working, tested** |
 | Unknown/blank | - | raw carve fallback (258 signatures, tiered validation) | **Working, tested** |
 
-Stub engines are registered so their absence is visible, but they never
-claim a source (`ProbeOutcome::No`); the UI never presents them as
-supported. Real engines land one at a time, each validated against
-fixtures and real volumes before the matrix changes.
+Nothing else is claimed. ReFS is **not implemented yet**: the
+reference product does ship a real engine for it (verified during
+clean-room RE - see `open-recovery-wizard/docs/08-driver-and-module-re.md`),
+and ours is in flight the honest way: a real formatted ReFS sample
+volume is built on CI (`refs-sample.yml`), the layout gets validated
+empirically against it (the approach that produced the HFS+ engine),
+and only then does the matrix row appear. Until then there is no stub
+crate to find: absent means absent.
+
+Btrfs scope, stated honestly: single-device, non-RAID volumes with
+crc32c-verified structures; compressed extents surface as metadata
+only (decompression is not in v1); multi-device/RAID falls back to raw
+carving with the reason recorded, never a half-parse.
+
+ZFS scope, stated honestly: single-device pools (one top-level disk or
+file vdev); mirrors, RAID-Z, multi-vdev, gang blocks, and native
+encryption fall back to raw carving with the reason recorded. Extents
+are the on-disk DVA ranges - for compressed blocks that is the
+byte-faithful physical representation; logical reconstruction of
+compressed streams is a recovery-writer feature, not a scan-time
+promise.
+
+ext4 journal-based deleted-dirent recovery (jbd2) is likewise a
+documented roadmap item, not a present feature.
 
 ### Safety properties
 
@@ -54,7 +73,7 @@ fixtures and real volumes before the matrix changes.
 | UI | React 19 + TypeScript + Vite + Tailwind 4 | Fast HMR, modern, small bundle |
 | Window | Tauri 2 + WebView2 | No Electron bloat; native webview |
 | Build / release | `cargo` + `tauri build` | Outputs MSI + NSIS + portable ZIP |
-| CI | GitHub Actions (Windows runners) | See [`data-wizard-ci`](https://github.com/heictojpgpics/data-wizard-ci) |
+| CI | GitHub Actions (Windows runners) | Workflows in `.github/workflows/` (Build and Test, Security Scan, Nightly Verification, Fuzz, Benchmarks) |
 
 ## Repository layout
 
@@ -68,10 +87,9 @@ data-wizard-rs/
 │   ├── dw-exfat/        # exFAT parser (FAT + directory bitmap + stream extensions)
 │   ├── dw-ext/          # ext2/3/4 parser (group descriptors + inode tables + extents)
 │   ├── dw-hfs/          # HFS+ parser (B-tree catalog + extents overflow)
-│   ├── dw-btrfs/        # Btrfs parser (chunk tree + root tree + checksum tree)
-│   ├── dw-refs/         # ReFS parser (metadata table + object ID index)
-│   ├── dw-zfs/          # ZFS parser (vdev label + uberblock + DMU object set)
-│   ├── dw-signature/    # file signature DB (rebuilt from public sources — NOT extracted)
+│   ├── dw-btrfs/        # Btrfs parser (checksummed b-trees + chunk mapping + COW orphan pass)
+│   ├── dw-zfs/          # ZFS parser (verified labels/uberblocks, DMU + SA + zap, prev-txg deep pass)
+│   ├── dw-signatures/   # file signature DB (rebuilt from public sources — NOT extracted)
 │   ├── dw-carver/       # raw file carving engine (header/footer + bifragment gap)
 │   └── dw-ipc/          # types shared between Rust core and Tauri/React
 ├── src-tauri/           # Tauri 2 shell + command handlers

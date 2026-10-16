@@ -107,15 +107,11 @@ mod tests {
     }
 }
 // ---------------------------------------------------------------------------
-// Scan statistics (age map + category + status aggregations)
+// Scan statistics (category + status aggregations)
 // ---------------------------------------------------------------------------
 
 /// Aggregated statistics over a scan's results, computed with bounded
 /// memory (the store is walked in pages, never fully snapshotted).
-///
-/// The month histogram drives the "bytes by last modified month" view:
-/// entries without a usable mtime are counted separately so the UI can
-/// say "N files have no recoverable timestamp" instead of hiding them.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ScanStats {
     pub total_files: u64,
@@ -124,10 +120,6 @@ pub struct ScanStats {
     pub by_status: Vec<(String, u64, u64)>,
     /// Per category: count + bytes.
     pub by_category: Vec<(Category, u64, u64)>,
-    /// Per month ("YYYY-MM"): count + bytes, ascending.
-    pub by_month: Vec<(String, u64, u64)>,
-    /// Files whose mtime could not be recovered (carved or wiped metadata).
-    pub no_timestamp_files: u64,
 }
 
 /// Compute stats over `results` by paging through it in batches.
@@ -136,7 +128,6 @@ pub fn compute_stats(results: &crate::results::ResultsStore) -> ScanStats {
     use std::collections::BTreeMap;
 
     let mut stats = ScanStats::default();
-    let mut months: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     let mut statuses: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     let mut categories: BTreeMap<Category, (u64, u64)> = BTreeMap::new();
 
@@ -159,16 +150,6 @@ pub fn compute_stats(results: &crate::results::ResultsStore) -> ScanStats {
             let c = categories.entry(cat).or_insert((0, 0));
             c.0 += 1;
             c.1 += e.size;
-
-            match e.mtime {
-                Some(t) => {
-                    let key = format!("{:04}-{:02}", t.year(), u8::from(t.month()));
-                    let m = months.entry(key).or_insert((0, 0));
-                    m.0 += 1;
-                    m.1 += e.size;
-                }
-                None => stats.no_timestamp_files += 1,
-            }
         }
         offset += page.len();
         if page.len() < PAGE {
@@ -181,7 +162,6 @@ pub fn compute_stats(results: &crate::results::ResultsStore) -> ScanStats {
         .into_iter()
         .map(|(k, (n, b))| (k, n, b))
         .collect();
-    stats.by_month = months.into_iter().map(|(k, (n, b))| (k, n, b)).collect();
     stats
 }
 
@@ -201,9 +181,8 @@ mod stats_tests {
     #![allow(clippy::panic, clippy::expect_used, clippy::unwrap_used)]
     use super::*;
     use crate::results::{RecoveredEntry, RecoveredEntryId, RecoveryStatus};
-    use time::OffsetDateTime;
 
-    fn entry(name: &str, ext: &str, size: u64, mtime: Option<OffsetDateTime>) -> RecoveredEntry {
+    fn entry(name: &str, ext: &str, size: u64) -> RecoveredEntry {
         RecoveredEntry {
             id: RecoveredEntryId(uuid::Uuid::new_v4()),
             fs_kind: "test".into(),
@@ -211,7 +190,7 @@ mod stats_tests {
             name: name.into(),
             size,
             start_lba: None,
-            mtime,
+            mtime: None,
             ctime: None,
             atime: None,
             status: RecoveryStatus::Intact,
@@ -225,56 +204,12 @@ mod stats_tests {
         }
     }
 
-    fn ts(year: i32, month: time::Month, day: u8) -> Option<OffsetDateTime> {
-        Some(
-            time::PrimitiveDateTime::new(
-                time::Date::from_calendar_date(year, month, day).unwrap(),
-                time::Time::from_hms(12, 0, 0).unwrap(),
-            )
-            .assume_utc(),
-        )
-    }
-
-    #[test]
-    fn months_aggregate_ascending() {
-        let store = crate::results::ResultsStore::new(100, None);
-        store.insert(entry("a.jpg", "jpg", 100, ts(2025, time::Month::March, 1)));
-        store.insert(entry(
-            "b.jpg",
-            "jpg",
-            200,
-            ts(2024, time::Month::December, 1),
-        ));
-        store.insert(entry("c.pdf", "pdf", 50, ts(2025, time::Month::March, 2)));
-
-        let stats = compute_stats(&store);
-        assert_eq!(stats.total_files, 3);
-        assert_eq!(stats.total_bytes, 350);
-        assert_eq!(stats.by_month.len(), 2);
-        assert_eq!(stats.by_month[0].0, "2024-12");
-        assert_eq!(stats.by_month[0].2, 200);
-        assert_eq!(stats.by_month[1].0, "2025-03");
-        assert_eq!(stats.by_month[1].1, 2);
-        assert_eq!(stats.by_month[1].2, 150);
-    }
-
-    #[test]
-    fn carved_files_without_mtime_are_counted_separately() {
-        let store = crate::results::ResultsStore::new(100, None);
-        store.insert(entry("x.jpg", "jpg", 10, None));
-        store.insert(entry("y.jpg", "jpg", 20, ts(2025, time::Month::January, 1)));
-
-        let stats = compute_stats(&store);
-        assert_eq!(stats.no_timestamp_files, 1);
-        assert_eq!(stats.by_month.len(), 1);
-    }
-
     #[test]
     fn categories_and_statuses_are_counted() {
         let store = crate::results::ResultsStore::new(100, None);
-        store.insert(entry("a.jpg", "jpg", 10, None));
-        store.insert(entry("b.mp4", "mp4", 100, None));
-        store.insert(entry("c.zip", "zip", 1000, None));
+        store.insert(entry("a.jpg", "jpg", 10));
+        store.insert(entry("b.mp4", "mp4", 100));
+        store.insert(entry("c.zip", "zip", 1000));
 
         let stats = compute_stats(&store);
         let photos = stats
@@ -297,7 +232,7 @@ mod stats_tests {
         let dir = tempfile::tempdir().unwrap().keep();
         let store = crate::results::ResultsStore::new(2, Some(dir.join("s.bin")));
         for i in 0..10 {
-            store.insert(entry(&format!("f{i}.jpg"), "jpg", i as u64 + 1, None));
+            store.insert(entry(&format!("f{i}.jpg"), "jpg", i as u64 + 1));
         }
         let stats = compute_stats(&store);
         assert_eq!(stats.total_files, 10);

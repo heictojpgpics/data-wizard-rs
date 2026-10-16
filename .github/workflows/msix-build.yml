@@ -1,0 +1,202 @@
+name: MSIX Build (Microsoft Store)
+
+# The Microsoft Store distribution pipeline (DiskGenie-proven flow):
+#   release exe + generated logo assets + the templated AppxManifest
+#   (packaging/msix/AppxManifest.xml) → MakeAppx pack → unsigned MSIX
+#   artifact. Partner Center validates + SIGNS on submission — that is
+#   why we do not sign in CI (the Store's signature is the
+#   tamper-evident distribution layer).
+#
+# Identity inputs (workflow_dispatch): set Name = the RESERVED APP NAME
+# in Partner Center and Publisher = the package identity Publisher
+# shown under App management → Product identity (default placeholders
+# build a locally-installable package for dev/testing only — the Store
+# rejects mismatched identity).
+#
+# WebView2: MSIX cannot embed the bootstrapper; the package targets
+# Win10 19041+ where the WebView2 Runtime is inbox/preinstalled.
+
+on:
+  workflow_dispatch:
+    inputs:
+      store_identity_name:
+        description: "Partner Center package identity Name (reserved app name)"
+        required: false
+        default: "DataWizard"
+      store_publisher:
+        description: "Partner Center package identity Publisher (CN=…)"
+        required: false
+        default: "CN=Data Wizard CI"
+  push:
+    branches: [main, draft]
+
+concurrency:
+  group: msix-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  msix:
+    name: Windows MSIX package (Store-ready)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: npm ci (root toolchain + ui)
+        shell: pwsh
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix ui ci --no-audit --no-fund
+
+      - name: Build the app (release exe, no installer)
+        run: npx tauri build --target x86_64-pc-windows-msvc --no-bundle
+        env:
+          CARGO_INCREMENTAL: "0"
+
+      - name: Read the app version
+        id: ver
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          # MSIX versions are 4-part and must increase per submission:
+          # app version + the run number as revision.
+          "version=$version.${{ github.run_number }}" | Set-Content $env:GITHUB_OUTPUT
+
+      - name: Generate the MSIX layout (exe + assets + manifest)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $identityName = "${{ github.event.inputs.store_identity_name || 'DataWizard' }}"
+          $publisher = "${{ github.event.inputs.store_publisher || 'CN=Data Wizard CI' }}"
+          $version = "${{ steps.ver.outputs.version }}"
+
+          # -- Layout: app files -----------------------------------------
+          $root = "msix-layout"
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "$root" | Out-Null
+          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
+          if (-not (Test-Path $exe)) { throw "exe not found: $exe" }
+          Copy-Item $exe "$root\dw-tauri.exe"
+          # Tauri 2 embeds the frontend; the release build emits no
+          # side-by-side DLLs (anything new would be copied here).
+
+          # -- Logo assets from the committed icon source ---------------
+          Add-Type -AssemblyName System.Drawing
+          $assets = "$root\Assets"
+          New-Item -ItemType Directory -Force -Path $assets | Out-Null
+          $src = [System.Drawing.Bitmap]::FromFile("$(Resolve-Path 'packaging\icon\icon-source.png')")
+          function Save-Png([int]$size, [string]$name) {
+            $bmp = New-Object System.Drawing.Bitmap $size, $size
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+            $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+            $g.DrawImage($src, 0, 0, $size, $size)
+            $bmp.Save("$assets\$name", [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          # Manifest-referenced sizes + Store tile variants.
+          Save-Png 44 "Square44x44Logo.targetsize-44.png"
+          Save-Png 44 "Square44x44Logo.targetsize-44_altform-unplated.png"
+          Save-Png 48 "Square44x44Logo.targetsize-48.png"
+          Save-Png 88 "Square44x44Logo.targetsize-88.png"
+          Save-Png 176 "Square44x44Logo.targetsize-176.png"
+          Save-Png 150 "Square150x150Logo.png"
+          Save-Png 310 "Square310x310Logo.png"
+          Save-Png 50 "StoreLogo.png"
+          # Wide tile (310x150) + Store hero (620x300): letterboxed on
+          # the brand teal so the package carries the full asset set.
+          foreach ($tile in @(
+              @{ name = 'Wide310x150Logo.png'; w = 310; h = 150 },
+              @{ name = 'ScreenCapture620x300.png'; w = 620; h = 300 }
+            )) {
+            $bmp = New-Object System.Drawing.Bitmap $tile.w, $tile.h
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::FromArgb(255, 13, 148, 136))
+            $side = [Math]::Min($tile.h, 300)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.DrawImage($src, [int](($tile.w - $side) / 2), [int](($tile.h - $side) / 2), $side, $side)
+            $bmp.Save("$assets\$($tile.name)", [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          $src.Dispose()
+
+          # -- Manifest: template + placeholder substitution -------------
+          $manifest = (Get-Content -Raw "packaging\msix\AppxManifest.xml") `
+            -replace '__IDENTITY_NAME__', $identityName `
+            -replace '__PUBLISHER__', $publisher `
+            -replace '__VERSION__', $version
+          $manifest | Set-Content -Encoding UTF8 "$root\AppxManifest.xml"
+          "identity: $identityName / $publisher / $version"
+          Get-ChildItem $root -Recurse -File | ForEach-Object { "layout: $($_.FullName)" }
+
+      - name: Pack the MSIX (MakeAppx)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\MakeAppx.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeappx) { throw "MakeAppx.exe not found (Windows SDK)" }
+          "MakeAppx: $($makeappx.FullName)"
+          $version = "${{ steps.ver.outputs.version }}"
+          $out = "dist-msix"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & $makeappx.FullName pack /o /v /d msix-layout /p "$out\DataWizard-$version-x64.msix"
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed ($LASTEXITCODE)" }
+          $hash = (Get-FileHash "$out\DataWizard-$version-x64.msix" -Algorithm SHA256).Hash.ToLower()
+          "$hash  DataWizard-$version-x64.msix" | Set-Content "$out\SHA256SUMS.txt"
+          Get-Content "$out\SHA256SUMS.txt"
+          Get-Item "$out\*.msix" | ForEach-Object { "msix: $($_.Name) - $([Math]::Round($_.Length / 1MB, 2)) MB" }
+
+      - name: "Optional: Windows App Cert Kit (best-effort pre-validation)"
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # Partner Center runs its own validation on submission; WACK
+          # here is an early warning only (unsigned Store packages may
+          # not be WACK-able locally - failures never block this job).
+          $wack = "C:\Program Files (x86)\Windows Kits\10\App Certification Kit\appcert.exe"
+          if (Test-Path $wack) {
+            "WACK present - running reset + package test (non-fatal)"
+            & $wack reset | Out-Null
+            & $wack test -appx (Resolve-Path "dist-msix\*.msix") | Out-Null
+            if (Test-Path "$env:LOCALAPPDATA\Microsoft\appcertkit") {
+              Copy-Item "$env:LOCALAPPDATA\Microsoft\appcertkit" -Destination "wack-report" -Recurse -ErrorAction SilentlyContinue
+            }
+          } else {
+            "WACK not installed on this runner - skipping (Partner Center validates on submission)."
+          }
+
+      - name: Upload the MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: datawizard-msix-store
+          path: |
+            dist-msix/*
+          if-no-files-found: error
+
+      - name: Upload the WACK report (if produced)
+        uses: actions/upload-artifact@v4
+        with:
+          name: datawizard-wack-report
+          path: wack-report/
+          if-no-files-found: ignore

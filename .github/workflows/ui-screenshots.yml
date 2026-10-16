@@ -1,0 +1,269 @@
+name: UI Screenshots
+
+# The Windows screenshot workflow (DiskGenie-proven technique, adapted
+# to the recovery domain): builds the REAL app (release, embedded
+# frontend), stages a synthetic NTFS volume with known deleted files
+# (VHD + diskpart — the same pattern as verification.yml), launches
+# with DATAWIZARD_TOUR=1 + DATAWIZARD_SCAN=\\.\T:, and captures
+# EXACTLY ONE NAMED FRAME PER TOUR STEP via the title-sync channel
+# (the TourDriver stamps `tNN-name` into the window title; the harness
+# polls it, lets the step settle, and shoots). The fixed-cadence
+# capture remains only as a zero-artifact fallback.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, draft]
+
+concurrency:
+  group: ui-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  screenshots-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Node cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
+
+      - name: npm ci (root toolchain + ui)
+        shell: pwsh
+        run: |
+          npm ci --no-audit --no-fund
+          npm --prefix ui ci --no-audit --no-fund
+
+      # WebView2: the runner image has it; provision defensively anyway
+      # (same check as the installer smoke).
+      - name: Provision WebView2 runtime
+        shell: pwsh
+        run: |
+          $wv2 = Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A7D48E4A}" -ErrorAction SilentlyContinue
+          if (-not $wv2 -or -not $wv2.PV) {
+            choco install -y webview2-runtime --no-progress | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "webview2-runtime install failed: $LASTEXITCODE" }
+          } else {
+            Write-Host "WebView2 runtime present: $($wv2.PV)"
+          }
+
+      - name: Build the app (release exe, no installer)
+        run: npx tauri build --target x86_64-pc-windows-msvc --no-bundle
+        env:
+          CARGO_INCREMENTAL: 0
+
+      - name: Stage a synthetic recovery volume (VHD)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # A 512 MB expandable NTFS volume with a realistic deleted-file
+          # population across categories (photos / videos / documents /
+          # archives / code) — the tour's auto-scan target.
+          $vhd = "$env:TEMP\dw-tour.vhd"
+          $vhdScript = @"
+          create vdisk file="$vhd" maximum=512 type=expandable
+          select vdisk file="$vhd"
+          attach vdisk
+          create partition primary
+          format fs=ntfs label="DWTour" quick
+          assign letter=T
+          exit
+          "@
+          $vhdScript | diskpart
+          Start-Sleep -Seconds 3
+
+          New-Item -ItemType Directory -Force -Path `
+            "T:\Users\anna\Pictures\Camera Roll", "T:\Users\anna\Pictures\Spain 2026", `
+            "T:\Users\anna\Videos", "T:\Users\anna\Documents\Work\Invoices", `
+            "T:\Users\anna\Music", "T:\Users\anna\Downloads", "T:\Users\anna\Projects\website" | Out-Null
+
+          # Photo population (some kept, most deleted — recoverable).
+          1..24 | ForEach-Object {
+            $bytes = New-Object byte[] (Get-Random -Minimum 120KB -Maximum 4MB)
+            [System.IO.File]::WriteAllBytes("T:\Users\anna\Pictures\Camera Roll\IMG_26$($_.ToString('00')).jpg", $bytes)
+          }
+          1..10 | ForEach-Object {
+            $bytes = New-Object byte[] (Get-Random -Minimum 2MB -Maximum 12MB)
+            [System.IO.File]::WriteAllBytes("T:\Users\anna\Pictures\Spain 2026\spanish-coast-$_.jpg", $bytes)
+          }
+          # Video + document + archive + code populations.
+          1..6 | ForEach-Object {
+            $bytes = New-Object byte[] (Get-Random -Minimum 8MB -Maximum 40MB)
+            [System.IO.File]::WriteAllBytes("T:\Users\anna\Videos\holiday-$_\.mp4".Replace('\.','.'), $bytes)
+          }
+          1..16 | ForEach-Object {
+            "invoice 2026-$_ — draft content for the recovery tour" |
+              Out-File -FilePath "T:\Users\anna\Documents\Work\Invoices\invoice-2026-$_.docx" -Encoding utf8
+          }
+          1..4 | ForEach-Object {
+            $bytes = New-Object byte[] (Get-Random -Minimum 4MB -Maximum 20MB)
+            [System.IO.File]::WriteAllBytes("T:\Users\anna\Downloads\backup-2026-$_\.zip".Replace('\.','.'), $bytes)
+          }
+          1..12 | ForEach-Object {
+            "// tour fixture module $_`nexport const v$_ = $_;" |
+              Out-File -FilePath "T:\Users\anna\Projects\website\module-$_.ts" -Encoding utf8
+          }
+          # Delete most of the population so the scan surfaces real
+          # recoverable entries (kept files prove the "Intact" status).
+          Get-ChildItem "T:\Users\anna\Pictures\Camera Roll" | Select-Object -Skip 4 | Remove-Item -Force
+          Get-ChildItem "T:\Users\anna\Pictures\Spain 2026" | Select-Object -Skip 2 | Remove-Item -Force
+          Get-ChildItem "T:\Users\anna\Videos" | Select-Object -Skip 1 | Remove-Item -Force
+          Get-ChildItem "T:\Users\anna\Documents\Work\Invoices" | Select-Object -Skip 5 | Remove-Item -Force
+          Get-ChildItem "T:\Users\anna\Downloads" | Select-Object -Skip 1 | Remove-Item -Force
+          Get-ChildItem "T:\Users\anna\Projects\website" | Select-Object -Skip 3 | Remove-Item -Force
+
+          $kept = (Get-ChildItem "T:\" -Recurse -File | Measure-Object).Count
+          "staged $kept surviving entries (the deleted population is what the scan recovers)"
+
+      - name: Run the app + capture the tour (title-synced, one frame per step)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          # Bump the runner display so the capture shows the COMPLETE app
+          # window (the default runner display can crop the right side).
+          # Non-fatal: fall back to the default resolution if unavailable.
+          try {
+            Set-DisplayResolution -Width 1920 -Height 1080 -Force | Out-Null
+            "display set to 1920x1080"
+          } catch {
+            "display resolution change unavailable ($($_.Exception.Message)) — capturing at default"
+          }
+          $exe = Join-Path $PWD "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
+          if (-not (Test-Path $exe)) { throw "exe not found: $exe" }
+          $env:DATAWIZARD_SCAN = '\\.\T:'
+          $env:DATAWIZARD_TOUR = '1'
+          $env:DATAWIZARD_WINDOW = '1360x840'
+          $out = Join-Path $env:RUNNER_TEMP 'shots'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $app = Start-Process -FilePath $exe -WorkingDirectory $PWD -RedirectStandardOutput "$env:RUNNER_TEMP\app-stdout.log" -RedirectStandardError "$env:RUNNER_TEMP\app-stderr.log" -PassThru
+          # bring to front
+          $ws = New-Object -ComObject WScript.Shell
+          $null = $ws.AppActivate($app.Id)
+          # Boot settle: WebView2 first paint + the auto-scan of the staged
+          # volume (512 MB NTFS with ~70 entries scans in a few seconds).
+          Start-Sleep -Milliseconds 6500
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+
+          function Shoot([string]$name) {
+            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bmp.Save((Join-Path $out $name), [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          function WindowTitle() {
+            # MainWindowTitle caches; Refresh() re-reads from Win32.
+            $app.Refresh()
+            return $app.MainWindowTitle
+          }
+
+          # ── TITLE-SYNCED capture: the TourDriver stamps each step into
+          # the window title (`Data Wizard · tNN-name`); poll it and shoot
+          # exactly ONE named frame per step — no duplicates, no misses,
+          # "one for one page/mode/action". DEDUP HARDENING: the loop
+          # keeps a captured-marker set so a step can only ever be shot
+          # once, no matter how the title flickers (Windows may decorate
+          # a busy window, transient re-renders re-match the regex).
+          $deadline = (Get-Date).AddMinutes(15)
+          $lastTitle = ''
+          $frames = 0
+          $sawMarker = $false
+          $shot = New-Object 'System.Collections.Generic.HashSet[string]'
+          while ((Get-Date) -lt $deadline -and -not $app.HasExited) {
+            $t = WindowTitle
+            if ($t -and $t -ne $lastTitle) {
+              if ($t -match '· tour-done') { "tour finished after $frames frames"; break }
+              if ($t -match '· (t\d{2}-[a-z0-9-]+)') {
+                $marker = $Matches[1]
+                if (-not $shot.Contains($marker)) {
+                  # Settle: let the view settle-in animation + the
+                  # debounced repaints land before the frame.
+                  Start-Sleep -Milliseconds 1300
+                  if ($app.HasExited) { break }
+                  Shoot(($marker + '.png'))
+                  $null = $shot.Add($marker)
+                  $frames++
+                  $sawMarker = $true
+                  "captured $marker"
+                }
+              } elseif (-not $sawMarker) {
+                # Pre-tour boot frame (the window before step 0); the
+                # name is constant so boot-time title flicker overwrites
+                # at most itself, never duplicates.
+                Shoot('t00-boot.png'); $frames++
+                "captured t00-boot (pre-tour)"
+              }
+              $lastTitle = $t
+            }
+            Start-Sleep -Milliseconds 250
+          }
+
+          # ── FALLBACK: no title markers (tour env missing / title sync
+          # broken) — the old cadence capture so the run never yields
+          # zero artifacts.
+          if (-not $sawMarker) {
+            "no tour title markers — falling back to cadence capture"
+            $step = 0
+            while ($step -lt 48 -and -not $app.HasExited) {
+              Start-Sleep -Milliseconds 2600
+              Shoot(('step-{0:d2}.png' -f $step))
+              $step++
+            }
+          }
+          if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+          Start-Sleep -Milliseconds 500
+          # Rust panics + tracing land in stderr; the webview console is
+          # not reachable from the harness — these logs make the next
+          # hang/blank diagnosis a download instead of a guess.
+          if (Test-Path "$env:RUNNER_TEMP\app-stderr.log") {
+            "--- app-stderr tail ---"
+            Get-Content "$env:RUNNER_TEMP\app-stderr.log" -Tail 40
+          }
+          Get-ChildItem $out | ForEach-Object { "captured $($_.Name)" }
+
+      - name: Detach the staged VHD (cleanup)
+        if: always()
+        shell: pwsh
+        run: |
+          $vhd = "$env:TEMP\dw-tour.vhd"
+          if (Test-Path $vhd) {
+            "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart | Out-Null
+            "vhd detached"
+          }
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: datawizard-ui-screenshots
+          path: ${{ runner.temp }}/shots
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload app logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: datawizard-app-logs
+          path: |
+            ${{ runner.temp }}/app-stdout.log
+            ${{ runner.temp }}/app-stderr.log
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,0 +1,144 @@
+name: ReFS sample builder
+
+on:
+  push:
+    branches: [main, draft]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: refs-sample-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-sample:
+    name: Format a real ReFS volume and upload it
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Create and format the VHD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vhd = "$env:TEMP\test_refs.vhd"
+          $vhdScript = @"
+          create vdisk file="$vhd" maximum=2048 type=expandable
+          select vdisk file="$vhd"
+          attach vdisk
+          create partition primary
+          assign letter=R
+          exit
+          "@
+          $vhdScript | diskpart | Out-Null
+
+          # ReFS rejects small volumes ("volume size is too small" below
+          # ~1 GiB), hence the 2 GiB VHD; format via the storage cmdlets.
+          $part = Get-Partition -DriveLetter R
+          $label = Format-Volume -Partition $part -FileSystem ReFS -NewFileSystemLabel "TestReFS" -Confirm:$false -Force
+          $label | Format-List | Out-String | Write-Host
+          fsutil fsinfo volumeinfo R:
+
+      - name: Populate the volume
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path R:\TestFiles -Force
+          New-Item -ItemType Directory -Path R:\Docs -Force | Out-Null
+
+          # 30 files with known, mappable content
+          1..30 | ForEach-Object {
+            $content = ("ReFS sample file $_ " + ("A" * 3000))
+            [IO.File]::WriteAllText("R:\TestFiles\file$_.txt", $content)
+          }
+          [IO.File]::WriteAllText("R:\Docs\notes.txt", "important document " + ("B" * 5000))
+
+          # A file with distinctive binary content for carving checks
+          $bin = New-Object byte[] 65536
+          for ($i = 0; $i -lt $bin.Length; $i++) { $bin[$i] = [byte](($i * 7) % 251) }
+          [IO.File]::WriteAllBytes("R:\Docs\pattern.bin", $bin)
+
+          # Distinct mtimes so the engine's timestamp decode is testable
+          (Get-Item R:\Docs\notes.txt).LastWriteTime = [DateTime]::new(2025, 1, 2, 3, 4, 5)
+          (Get-Item R:\Docs\pattern.bin).LastWriteTime = [DateTime]::new(2025, 6, 7, 8, 9, 10)
+
+          # Delete 15 of the 30 (deep-pass material)
+          1..15 | ForEach-Object { Remove-Item "R:\TestFiles\file$_.txt" }
+          Get-ChildItem -Recurse R:\ | Select-Object FullName, Length | Out-String | Write-Host
+
+      - name: Dump the raw volume (nonzero clusters only)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Full-fidelity, tiny artifact: stream (index u64, data 4096) for
+          # every nonzero 4 KiB cluster of the volume; the reconstruction
+          # locally rebuilds the exact image as a sparse file.
+          $vol = New-Object IO.FileStream("\\.\R:", 'Open', 'Read', [IO.FileShare]::ReadWrite)
+          $len = 0L
+          $vol.Position = 0
+          $probe = New-Object byte[] (4MB)
+          while ($true) {
+            $n = $vol.Read($probe, 0, $probe.Length)
+            if ($n -le 0) { break }
+            $len += $n
+          }
+          Write-Host "volume length: $len"
+
+          # Exact zero check in C#: a PowerShell byte loop over 2 GiB never
+          # finishes and sampled checks miss data between samples.
+          Add-Type -TypeDefinition @"
+          public static class ZChk {
+            public static unsafe bool IsZero(byte[] b, int off, int len) {
+              fixed (byte* p = &b[off]) {
+                ulong* q = (ulong*)p;
+                for (int i = 0; i < len / 8; i++) { if (q[i] != 0UL) return false; }
+                for (int i = len & ~7; i < len; i++) { if (b[off + i] != 0) return false; }
+              }
+              return true;
+            }
+          }
+          "@ -CompilerOptions "/unsafe"
+          $out = New-Object IO.FileStream("$env:TEMP\refs-nz.bin", 'Create', 'Write')
+          $buf = New-Object byte[] (4096)
+          $count = 0
+          for ($off = 0L; $off -lt $len; $off += 4096) {
+            $vol.Position = $off
+            $got = 0
+            while ($got -lt 4096) {
+              $r = $vol.Read($buf, $got, 4096 - $got)
+              if ($r -le 0) { break }
+              $got += $r
+            }
+            if ($got -lt 4096) { for ($i = $got; $i -lt 4096; $i++) { $buf[$i] = 0 } }
+            if (-not [ZChk]::IsZero($buf, 0, 4096)) {
+              $idx = [BitConverter]::GetBytes([UInt64]($off / 4096))
+              $out.Write($idx, 0, 8)
+              $out.Write($buf, 0, 4096)
+              $count++
+            }
+          }
+          $out.Close()
+          $vol.Close()
+          Write-Host "nonzero clusters: $count"
+          @{ volume_bytes = $len; cluster = 4096; nonzero_clusters = $count } |
+            ConvertTo-Json | Set-Content "$env:TEMP\refs-manifest.json"
+
+      - name: Compress and upload
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Compress-Archive -Path "$env:TEMP\refs-nz.bin", "$env:TEMP\refs-manifest.json" -DestinationPath refs-sample.zip
+          $sum = (Get-FileHash refs-sample.zip -Algorithm SHA256).Hash
+          "sha256 refs-sample.zip = $sum" | Write-Host
+
+      - name: Upload sample
+        uses: actions/upload-artifact@v4
+        with:
+          name: refs-sample-vhd
+          path: refs-sample.zip
+          retention-days: 30
+          if-no-files-found: error

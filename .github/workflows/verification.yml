@@ -1,0 +1,301 @@
+name: Nightly Verification
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+
+concurrency:
+  group: nightly-verification
+  cancel-in-progress: true
+
+jobs:
+  ntfs-round-trip:
+    name: NTFS round-trip test
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build workspace + scantool
+        run: cargo build --workspace --release
+
+      - name: Create NTFS test VHD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vhd = "$env:TEMP\test_ntfs.vhd"
+          $vhdScript = @"
+          create vdisk file="$vhd" maximum=1024 type=expandable
+          select vdisk file="$vhd"
+          attach vdisk
+          create partition primary
+          format fs=ntfs label="TestNTFS" quick
+          assign letter=T
+          exit
+          "@
+          $vhdScript | diskpart
+
+          New-Item -ItemType Directory -Path T:\TestFiles -Force
+          1..100 | ForEach-Object {
+            "test file $_ content - this is a test file for data recovery verification" |
+              Out-File -FilePath "T:\TestFiles\file$_.txt" -Encoding utf8
+          }
+
+          # Delete the first 50 files (these should be recoverable)
+          1..50 | ForEach-Object {
+            Remove-Item "T:\TestFiles\file$_.txt"
+          }
+
+          New-Item -ItemType Directory -Path T:\Docs -Force
+          New-Item -ItemType Directory -Path T:\Images -Force
+          "important document" | Out-File -FilePath T:\Docs\notes.txt -Encoding utf8
+
+          "select vdisk file=`"$vhd`"ndetach vdisk`nexit" | diskpart
+          Write-Host "VHD created: $vhd"
+
+      - name: Run dw-scan against VHD
+        shell: pwsh
+        run: |
+          $vhd = "$env:TEMP\test_ntfs.vhd"
+          & target\release\dw-scan.exe $vhd 2>&1 | Tee-Object -FilePath ntfs_scan.txt
+          $content = Get-Content ntfs_scan.txt -Raw
+          if ($content -notmatch "Total entries: \d+") {
+            Write-Error "Scan did not produce output"; exit 1
+          }
+          $count = [int][regex]::Match($content, "Total entries: (\d+)").Groups[1].Value
+          Write-Host "Scan found $count entries"
+          if ($count -lt 10) { Write-Error "Expected at least 10 entries, got $count"; exit 1 }
+          if ($content -notmatch 'fs:\s+"?ntfs"?) { Write-Error "NTFS not detected"; exit 1 }
+          Write-Host "Verification PASSED: found $count entries"
+
+      - name: Run integration test
+        shell: pwsh
+        run: |
+          $env:DW_TEST_IMAGE = "$env:TEMP\test_ntfs.vhd"
+          cargo test --package dw-ntfs --test integration -- --ignored --nocapture
+
+      - name: Upload scan output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ntfs-scan-output-${{ github.run_id }}
+          path: |
+            ntfs_scan.txt
+            ${{ runner.temp }}/test_ntfs.vhd
+          retention-days: 7
+          if-no-files-found: error
+
+  fat-round-trip:
+    name: FAT32 round-trip test
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build workspace
+        run: cargo build --workspace --release
+
+      - name: Create FAT32 test VHD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vhd = "$env:TEMP\test_fat32.vhd"
+          $vhdScript = @"
+          create vdisk file="$vhd" maximum=512 type=expandable
+          select vdisk file="$vhd"
+          attach vdisk
+          create partition primary
+          format fs=fat32 label="TestFAT" quick
+          assign letter=U
+          exit
+          "@
+          $vhdScript | diskpart
+
+          New-Item -ItemType Directory -Path U:\TestFiles -Force
+          1..50 | ForEach-Object {
+            "fat test file $_" | Out-File -FilePath "U:\TestFiles\file$_.txt" -Encoding utf8
+          }
+          1..25 | ForEach-Object {
+            Remove-Item "U:\TestFiles\file$_.txt"
+          }
+
+          "select vdisk file=`"$vhd`"ndetach vdisk`nexit" | diskpart
+          Write-Host "FAT32 VHD created: $vhd"
+
+      - name: Run dw-scan against VHD (quick + deep)
+        shell: pwsh
+        run: |
+          $vhd = "$env:TEMP\test_fat32.vhd"
+          & target\release\dw-scan.exe $vhd --deep 2>&1 | Tee-Object -FilePath fat_scan.txt
+          $content = Get-Content fat_scan.txt -Raw
+          if ($content -notmatch "Total entries: \d+") { Write-Error "Scan produced no output"; exit 1 }
+          $count = [int][regex]::Match($content, "Total entries: (\d+)").Groups[1].Value
+          Write-Host "FAT32 scan found $count entries"
+          if ($count -lt 25) { Write-Error "Expected >= 25 entries, got $count"; exit 1 }
+          if ($content -notmatch 'fs:\s+"?fat32"?') { Write-Error "FAT32 not detected"; exit 1 }
+          Write-Host "FAT32 verification PASSED"
+
+      - name: Upload FAT32 artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fat32-scan-output-${{ github.run_id }}
+          path: |
+            fat_scan.txt
+            ${{ runner.temp }}/test_fat32.vhd
+          retention-days: 7
+          if-no-files-found: error
+
+  exfat-round-trip:
+    name: exFAT round-trip test
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build dw-scan (scantool)
+        run: cargo build --release -p dw-scantool
+
+      - name: Create exFAT test VHD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vhd = "$env:TEMP\test_exfat.vhd"
+          $vhdScript = @"
+          create vdisk file="$vhd" maximum=512 type=expandable
+          select vdisk file="$vhd"
+          attach vdisk
+          create partition primary
+          format fs=exfat label="TestExFAT" quick
+          assign letter=X
+          exit
+          "@
+          $vhdScript | diskpart
+
+          New-Item -ItemType Directory -Path X:\TestFiles -Force
+          1..50 | ForEach-Object {
+            "exfat test file $_ content" | Out-File -FilePath "X:\TestFiles\file$_.txt" -Encoding utf8
+          }
+          1..25 | ForEach-Object {
+            Remove-Item "X:\TestFiles\file$_.txt"
+          }
+          # A fragmented file: append in chunks to force multi-extent
+          $frag = [System.IO.File]::Create("X:\TestFiles\fragmented.bin")
+          $rand = New-Object System.Random(42)
+          1..64 | ForEach-Object {
+            $bytes = New-Object byte[] (64*1024)
+            $rand.NextBytes($bytes)
+            $frag.Write($bytes, 0, $bytes.Length)
+            "spacer $_" | Out-File -FilePath "X:\TestFiles\spacer$_.txt" -Encoding utf8
+          }
+          $frag.Close()
+
+          "select vdisk file=`"$vhd`"ndetach vdisk`nexit" | diskpart
+          Write-Host "exFAT VHD created: $vhd"
+
+      - name: Run dw-scan against VHD (quick + deep)
+        shell: pwsh
+        run: |
+          $vhd = "$env:TEMP\test_exfat.vhd"
+          & target\release\dw-scan.exe $vhd --deep 2>&1 | Tee-Object -FilePath exfat_scan.txt
+          $content = Get-Content exfat_scan.txt -Raw
+          if ($content -notmatch "Total entries: \d+") { Write-Error "Scan produced no output"; exit 1 }
+          $count = [int][regex]::Match($content, "Total entries: (\d+)").Groups[1].Value
+          Write-Host "exFAT scan found $count entries"
+          if ($count -lt 25) {
+            Write-Error "Expected >= 25 entries (50 files - 25 deleted + dirs + carved), got $count"; exit 1
+          }
+          if ($content -notmatch 'fs:\s+"?exfat"?') { Write-Error "exFAT not detected"; exit 1 }
+          Write-Host "exFAT verification PASSED"
+
+      - name: Upload exFAT artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: exfat-scan-output-${{ github.run_id }}
+          path: |
+            exfat_scan.txt
+            ${{ runner.temp }}/test_exfat.vhd
+          retention-days: 7
+          if-no-files-found: error
+
+  partition-discovery:
+    name: Partition discovery (GPT + MBR)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build dw-scan (scantool)
+        run: cargo build --release -p dw-scantool
+
+      - name: Create two-partition VHD (GPT)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vhd = "$env:TEMP\test_parts.vhd"
+          $vhdScript = @"
+          create vdisk file="$vhd" maximum=1024 type=expandable
+          select vdisk file="$vhd"
+          attach vdisk
+          convert gpt
+          create partition primary
+          format fs=ntfs label="PartNTFS" quick
+          assign letter=Y
+          create partition primary
+          format fs=fat32 label="PartFAT" quick
+          assign letter=Z
+          exit
+          "@
+          $vhdScript | diskpart
+          New-Item -ItemType Directory -Path Y:\N -Force
+          "ntfs partition file" | Out-File -FilePath Y:\N\a.txt -Encoding utf8
+          New-Item -ItemType Directory -Path Z:\F -Force
+          "fat32 partition file" | Out-File -FilePath Z:\F\b.txt -Encoding utf8
+          "select vdisk file=`"$vhd`"ndetach vdisk`nexit" | diskpart
+          Write-Host "GPT VHD created"
+
+      - name: Verify partition listing + per-partition scans
+        shell: pwsh
+        run: |
+          $vhd = "$env:TEMP\test_parts.vhd"
+          & target\release\dw-scan.exe $vhd --partitions 2>&1 | Tee-Object -FilePath parts.txt
+          $content = Get-Content parts.txt -Raw
+          if ($content -notmatch "table: gpt") { Write-Error "GPT not detected"; exit 1 }
+          if ($content -notmatch 'fs:\s+"?ntfs"?') { Write-Error "NTFS partition not probed"; exit 1 }
+          if ($content -notmatch 'fs:\s+"?fat32"?') { Write-Error "FAT32 partition not probed"; exit 1 }
+
+          & target\release\dw-scan.exe $vhd --partition 2 2>&1 | Tee-Object -FilePath part2.txt
+          $p2 = Get-Content part2.txt -Raw
+          if ($p2 -notmatch 'fs:\s+"?fat32"?') { Write-Error "Partition 2 not scanned as FAT32"; exit 1 }
+          if ($p2 -notmatch "b\.txt") { Write-Error "Partition 2 file not found"; exit 1 }
+          Write-Host "Partition discovery PASSED"
+
+      - name: Upload partition artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: partition-scan-output-${{ github.run_id }}
+          path: |
+            parts.txt
+            part2.txt
+            ${{ runner.temp }}/test_parts.vhd
+          retention-days: 7
+          if-no-files-found: error

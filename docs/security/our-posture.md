@@ -33,7 +33,7 @@ Every binary we ship has:
 | Stack cookies | Rust default | `winchecksec` in CI |
 | High-entropy VA | Rust default (x86_64) | `winchecksec` in CI |
 
-The CI workflow (`data-wizard-ci`) runs `winchecksec` on the built
+The Security Scan workflow (this repo) runs `winchecksec` on the built
 `dw-tauri.exe` and fails the build if any mitigation is missing.
 
 ## Supply chain

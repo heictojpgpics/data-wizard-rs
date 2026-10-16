@@ -1,0 +1,26 @@
+[package]
+name = "dw-btrfs-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dw-btrfs = { path = ".." }
+
+[[bin]]
+name = "fuzz_superblock"
+path = "fuzz_targets/fuzz_superblock.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_items"
+path = "fuzz_targets/fuzz_items.rs"
+test = false
+doc = false
+
+[workspace]

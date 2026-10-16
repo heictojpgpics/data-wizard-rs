@@ -1,0 +1,80 @@
+name: Fuzz
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Duration per target (seconds)'
+        required: false
+        default: '300'
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Fuzz parsers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crate: dw-ntfs
+            target: fuzz_mft_record
+          - crate: dw-ntfs
+            target: fuzz_vbr_parse
+          - crate: dw-ntfs
+            target: fuzz_filename_parse
+          - crate: dw-fat
+            target: fuzz_bpb_parse
+          - crate: dw-fat
+            target: fuzz_direntry_parse
+          - crate: dw-fat
+            target: fuzz_fat_table
+          - crate: dw-exfat
+            target: fuzz_boot_parse
+          - crate: dw-exfat
+            target: fuzz_direntry_parse
+          - crate: dw-hfs
+            target: fuzz_btree_node
+          - crate: dw-hfs
+            target: fuzz_catalog_record
+          - crate: dw-hfs
+            target: fuzz_volume_header
+          - crate: dw-btrfs
+            target: fuzz_superblock
+          - crate: dw-btrfs
+            target: fuzz_items
+          - crate: dw-zfs
+            target: fuzz_nvlist
+          - crate: dw-zfs
+            target: fuzz_zap_leaf
+          - crate: dw-zfs
+            target: fuzz_sa_bonus
+          - crate: dw-zfs
+            target: fuzz_compress
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run fuzz target
+        working-directory: crates/${{ matrix.crate }}
+        run: cargo fuzz run ${{ matrix.target }} -- -max_total_time=${{ github.event.inputs.duration || '300' }} -rss_limit_mb=2560
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.crate }}-${{ matrix.target }}
+          path: |
+            crates/${{ matrix.crate }}/fuzz/artifacts/
+            crates/${{ matrix.crate }}/crash-*
+          retention-days: 90
+          if-no-files-found: ignore

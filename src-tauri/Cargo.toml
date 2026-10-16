@@ -1,7 +1,8 @@
 # Standalone workspace root: this package is deliberately outside the
 # library workspace (it pulls the Tauri 2 tree, which would break the
-# light-weight lib CI jobs). Builds:
-#   cd src-tauri && cargo build --release --example scan_volume
+# light-weight lib CI jobs). The CLI for scanning images/volumes is
+# `dw-scantool` (bin `dw-scan`) in the main workspace; this crate is the
+# GUI shell only.
 #
 # NOTE: the workspace dependencies table below is a synchronized copy of
 # the root workspace's table (keep both in sync).
@@ -18,7 +19,6 @@ dw-exfat      = { path = "../crates/dw-exfat" }
 dw-ext        = { path = "../crates/dw-ext" }
 dw-hfs        = { path = "../crates/dw-hfs" }
 dw-btrfs      = { path = "../crates/dw-btrfs" }
-dw-refs       = { path = "../crates/dw-refs" }
 dw-zfs        = { path = "../crates/dw-zfs" }
 dw-signatures = { path = "../crates/dw-signatures" }
 dw-carver     = { path = "../crates/dw-carver" }
@@ -74,7 +74,6 @@ uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-tauri-plugin-log = "2"
 tauri-plugin-window-state = "2"
 specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"
@@ -103,14 +102,12 @@ dw-fat         = { workspace = true }
 dw-exfat       = { workspace = true }
 dw-ext         = { workspace = true }
 dw-hfs         = { workspace = true }
-dw-btrfs       = { workspace = true }
-dw-refs        = { workspace = true }
-dw-zfs         = { workspace = true }
+dw-btrfs     = { workspace = true }
+dw-zfs       = { workspace = true }
 dw-signatures  = { workspace = true }
 dw-carver      = { workspace = true }
 tauri          = { workspace = true }
 tauri-plugin-dialog       = { workspace = true }
-tauri-plugin-log          = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 specta          = { workspace = true, features = ["derive"] }
 tauri-specta    = { workspace = true, features = ["derive", "typescript"] }

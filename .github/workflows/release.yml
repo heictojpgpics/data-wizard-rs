@@ -1,5 +1,10 @@
 name: Release
 
+# The tag pipeline (DiskGenie flow): the per-user NSIS installer + the
+# Store-ready MSIX (MakeAppx over the committed manifest template) +
+# the portable zip + SHA256SUMS256. Built once on the tag; every
+# artifact carries a checksum row.
+
 on:
   push:
     tags:
@@ -13,63 +18,176 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+permissions:
+  contents: write
 
 jobs:
-  build-windows-release:
-    name: Build Windows release
-    runs-on: windows-2022
+  release-windows:
+    name: Build Windows release (NSIS + MSIX + portable)
+    runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-directories: |
+            src-tauri/target
 
       - name: Install Node
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '24'
           cache: 'npm'
-          cache-dependency-path: ui/package.json
+          cache-dependency-path: |
+            package-lock.json
+            ui/package-lock.json
 
-      - name: Install UI deps
-        working-directory: ui
-        run: npm ci || npm install
-
-      - name: Build UI
-        working-directory: ui
-        run: npm run build
-
-      - name: Build Tauri release (MSI + NSIS)
-        run: cargo tauri build --target x86_64-pc-windows-msvc
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ''
-
-      - name: Build portable ZIP
+      - name: npm ci (root toolchain + ui, locked)
         shell: pwsh
         run: |
-          $ts = Get-Date -Format "yyyyMMdd-HHmmss"
-          $zip = "data-wizard-${{ github.ref_name }}-windows-portable.zip"
-          Compress-Archive -Path target/x86_64-pc-windows-msvc/release/dw-tauri.exe -DestinationPath $zip
-          Write-Host "Zip: $zip"
+          npm ci --no-audit --no-fund
+          npm --prefix ui ci --no-audit --no-fund
 
-      - name: Upload MSI
+      - name: Resolve the release tag
+        id: tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag -or $tag -eq "main" -or $tag -eq "draft") { $tag = "v${{ inputs.version }}" }
+          if (-not $tag -or $tag -eq "v") { throw "no version: push a v*.*.* tag or pass the dispatch input" }
+          "tag=$tag" | Set-Content $env:GITHUB_OUTPUT
+          "version=$($tag.TrimStart('v'))" | Add-Content $env:GITHUB_OUTPUT
+
+      - name: Read the Cargo app version
+        id: ver
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path src-tauri/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          "cargo_version=$version" | Set-Content $env:GITHUB_OUTPUT
+          # MSIX versions are 4-part and must increase per submission.
+          "msix_version=$version.${{ github.run_number }}" | Add-Content $env:GITHUB_OUTPUT
+
+      # ── 1. The NSIS installer (per-user + WebView2 embedBootstrapper) ──
+      - name: Build the NSIS installer
+        run: npx tauri build --target x86_64-pc-windows-msvc
+        timeout-minutes: 40
+
+      # ── 2. The Store-ready MSIX (MakeAppx over the manifest template) ──
+      - name: Build the MSIX package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $identityName = "DataWizard"
+          $publisher = "CN=Data Wizard CI"
+          $version = "${{ steps.ver.outputs.msix_version }}"
+
+          $root = "msix-layout"
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path "$root\Assets" | Out-Null
+          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
+          if (-not (Test-Path $exe)) { throw "exe not found: $exe" }
+          Copy-Item $exe "$root\dw-tauri.exe"
+
+          Add-Type -AssemblyName System.Drawing
+          $src = [System.Drawing.Bitmap]::FromFile("$(Resolve-Path 'packaging\icon\icon-source.png')")
+          function Save-Png([int]$size, [string]$name) {
+            $bmp = New-Object System.Drawing.Bitmap $size, $size
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+            $g.DrawImage($src, 0, 0, $size, $size)
+            $bmp.Save("$root\Assets\$name", [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          Save-Png 44  "Square44x44Logo.targetsize-44.png"
+          Save-Png 44  "Square44x44Logo.targetsize-44_altform-unplated.png"
+          Save-Png 48  "Square44x44Logo.targetsize-48.png"
+          Save-Png 88  "Square44x44Logo.targetsize-88.png"
+          Save-Png 176 "Square44x44Logo.targetsize-176.png"
+          Save-Png 150 "Square150x150Logo.png"
+          Save-Png 310 "Square310x310Logo.png"
+          Save-Png 50  "StoreLogo.png"
+          foreach ($tile in @(
+              @{ name = 'Wide310x150Logo.png'; w = 310; h = 150 },
+              @{ name = 'ScreenCapture620x300.png'; w = 620; h = 300 }
+            )) {
+            $bmp = New-Object System.Drawing.Bitmap $tile.w, $tile.h
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::FromArgb(255, 13, 148, 136))
+            $side = [Math]::Min($tile.h, 300)
+            $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+            $g.DrawImage($src, [int](($tile.w - $side) / 2), [int](($tile.h - $side) / 2), $side, $side)
+            $bmp.Save("$root\Assets\$($tile.name)", [System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose(); $bmp.Dispose()
+          }
+          $src.Dispose()
+
+          $manifest = (Get-Content -Raw "packaging\msix\AppxManifest.xml") `
+            -replace '__IDENTITY_NAME__', $identityName `
+            -replace '__PUBLISHER__', $publisher `
+            -replace '__VERSION__', $version
+          $manifest | Set-Content -Encoding UTF8 "$root\AppxManifest.xml"
+
+          $makeappx = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\MakeAppx.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeappx) { throw "MakeAppx.exe not found (Windows SDK)" }
+          New-Item -ItemType Directory -Force -Path "release" | Out-Null
+          & $makeappx.FullName pack /o /v /d $root /p "release\DataWizard-$version-x64.msix"
+          if ($LASTEXITCODE -ne 0) { throw "MakeAppx failed ($LASTEXITCODE)" }
+
+      # ── 3. Stage: installer + MSIX + portable + checksums ──────────────
+      - name: Stage release files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "${{ steps.tag.outputs.tag }}"
+          $version = "${{ steps.tag.outputs.version }}"
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+
+          $installer = Get-ChildItem "src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis" -Filter "*.exe" |
+            Where-Object { $_.Name -notlike "*uninstall*" } | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer not found" }
+          Copy-Item $installer.FullName "release\DataWizard-$tag-windows-x64-setup.exe"
+
+          $portable = "release\portable"
+          New-Item -ItemType Directory -Force -Path $portable | Out-Null
+          Copy-Item "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe" "$portable\DataWizard.exe"
+          @(
+            "Data Wizard $version portable. Runs without installing;",
+            "WebView2 Runtime is required (bundled with the setup exe instead)."
+          ) | Set-Content "$portable\README.txt"
+          Compress-Archive -Path $portable -DestinationPath "release\DataWizard-$tag-windows-x64-portable.zip" -Force
+          Remove-Item $portable -Recurse -Force
+
+          Get-ChildItem release -File | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content release\SHA256SUMS256.txt
+          Get-Content release\SHA256SUMS256.txt
+          Get-ChildItem release -File | Select-Object Name, @{ n = 'MB'; e = { [Math]::Round($_.Length / 1MB, 2) } } | Format-Table
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-msi
-          path: target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-          retention-days: 90
+          name: datawizard-release-${{ steps.tag.outputs.tag }}
+          path: |
+            release/*
+          if-no-files-found: error
 
-      - name: Upload NSIS
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-nsis
-          path: target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-          retention-days: 90
-
-      - name: Upload portable ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-portable
-          path: data-wizard-*.zip
-          retention-days: 90
+      - name: Attach artifacts to the tag release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.tag.outputs.tag }}"
+          gh release create $tag --title "Data Wizard $tag" --generate-notes --draft `
+            release\DataWizard-$tag-windows-x64-setup.exe `
+            release\DataWizard-$tag-windows-x64-portable.zip `
+            release\DataWizard-*.msix `
+            release\SHA256SUMS256.txt

@@ -66,10 +66,11 @@ export type ScanPhase =
 export interface ScanProgress {
   scan_id: string;
   phase: ScanPhase;
-  current: number;
-  total: number;
+  current: u64_like;
+  total: u64_like;
   message: string;
 }
+type u64_like = number;
 
 export interface StartScanResponse {
   scan_id: string;
@@ -79,12 +80,6 @@ export interface ListResultsResponse {
   total: number;
   spilled: number;
   items: RecoveredFile[];
-}
-
-export interface AgeBucketDto {
-  month: string;
-  files: number;
-  bytes: number;
 }
 
 export interface CategoryCountDto {
@@ -106,8 +101,6 @@ export interface ScanStatsDto {
   total_bytes: number;
   by_status: StatusCountDto[];
   by_category: CategoryCountDto[];
-  by_month: AgeBucketDto[];
-  no_timestamp_files: number;
 }
 
 export interface FileRecoveryOutcome {
@@ -137,4 +130,26 @@ export interface RecoverFilesResponse {
   results: FileRecoveryOutcome[];
   warnings: string[];
   errors: string[];
+}
+
+export interface SavedScanSummary {
+  scan_id: string;
+  source_uri: string;
+  created_at: string;
+  mode: "quick" | "deep";
+  state: string;
+  entries: number;
+}
+
+export interface ListPartitionsResponse {
+  table_kind: "gpt" | "mbr" | "none";
+  partitions: PartitionInfo[];
+}
+
+/** Dev hooks (CI screenshot tours + mock browser tours). Mirrors the
+ * Rust `get_dev_hooks` command (env-var driven; harmless in prod). */
+export interface DevHooks {
+  tour: boolean;
+  tour_mode: string | null;
+  scan: string | null;
 }

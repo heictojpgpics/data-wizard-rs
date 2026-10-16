@@ -1,201 +1,375 @@
-// Source selection: physical disks and volumes (Windows), file-backed
-// images everywhere, and saved scans to resume.
-
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { DiskInfo } from "../bindings";
-import { formatBytes } from "../lib/format";
-
-interface SavedScan {
-  scan_id: string;
-  source_uri: string;
-  created_at: string;
-  mode: string;
-  state: string;
-  entries: number;
-}
+/**
+ * Source selection (the landing view): hero + trust strip, drive cards
+ * with expandable partition rows (partition-scoped scans), the disk
+ * image opener, and saved scans to resume.
+ */
+import { useRef, useState } from "react";
+import { invoke } from "../lib/ipc";
+import type { DiskInfo, PartitionInfo, SavedScanSummary } from "../bindings";
+import {
+  ChevronRightIcon,
+  ClockIcon,
+  DiscIcon,
+  HardDriveIcon,
+  HistoryIcon,
+  PlayIcon,
+  RefreshIcon,
+  ScanSearchIcon,
+  UsbIcon,
+  WandIcon,
+  DatabaseIcon,
+} from "../lib/Icon";
+import { busLabel, formatBytes, timeAgo } from "../lib/format";
+import { useAppStore } from "../state/app";
 
 interface Props {
-  disks: DiskInfo[];
-  loading: boolean;
-  onRefresh: () => void;
-  onScan: (sourceUri: string, deep: boolean) => void;
-  onResume: (savedScanId: string, deep: boolean) => void;
+  onScan: (source: { uri: string; label: string; detail: string; partition: number | null }, deep: boolean) => void;
+  onResume: (saved: SavedScanSummary) => void;
 }
 
-export function SelectSource({
-  disks,
-  loading,
-  onRefresh,
-  onScan,
-  onResume,
-}: Props) {
-  const [saved, setSaved] = useState<SavedScan[]>([]);
+const TRUST = [
+  "Scanning is strictly read-only",
+  "Nothing on the source is modified",
+  "Files recover to a drive you choose",
+];
 
-  useEffect(() => {
-    invoke<{ scans: SavedScan[] }>("list_saved_scans", { req: {} })
-      .then((res) => setSaved(res.scans))
-      .catch(() => setSaved([]));
-  }, []);
+function DiskGlyph({ disk }: { disk: DiskInfo }) {
+  const Icon = disk.is_removable ? UsbIcon : disk.bus_type === "Nvme" ? DiscIcon : HardDriveIcon;
+  return <Icon size={20} />;
+}
+
+function PartitionRow({
+  part,
+  disk,
+  onScan,
+}: {
+  part: PartitionInfo;
+  disk: DiskInfo;
+  onScan: Props["onScan"];
+}) {
+  const fs = part.fs_kind?.toUpperCase() ?? "UNKNOWN";
+  const label = part.drive_letter
+    ? `${part.drive_letter} ${part.label ?? ""}`.trim()
+    : part.label ?? `Partition ${part.index}`;
+  return (
+    <div className="dw-part-row">
+      <div className="dw-part-id">
+        <span className="dw-part-name dw-selectable-text">{label}</span>
+        <span className="dw-part-fs">{fs}</span>
+        {part.is_system && <span className="dw-part-badge">System</span>}
+      </div>
+      <span className="dw-part-size">{formatBytes(part.size_bytes)}</span>
+      <div className="dw-part-actions">
+        <button
+          className="dw-btn-ghost"
+          onClick={() =>
+            onScan(
+              {
+                uri: disk.id,
+                label,
+                detail: `${fs} · ${disk.display_name}`,
+                partition: part.index,
+              },
+              false,
+            )
+          }
+        >
+          Quick scan
+        </button>
+        <button
+          className="dw-btn-outline dw-sm"
+          onClick={() =>
+            onScan(
+              {
+                uri: disk.id,
+                label,
+                detail: `${fs} · ${disk.display_name}`,
+                partition: part.index,
+              },
+              true,
+            )
+          }
+        >
+          <ScanSearchIcon size={14} />
+          Deep scan
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function DiskCard({ disk, onScan }: { disk: DiskInfo; onScan: Props["onScan"] }) {
+  const [open, setOpen] = useState(false);
+  const hasParts = disk.partitions.length > 0;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
-      <section>
-        <h2 className="mb-1 text-lg font-semibold">
-          Choose what to recover
-        </h2>
-        <p className="text-sm text-zinc-400">
-          Pick a disk, a partition, or a disk image. Scanning is read-only:
-          nothing on the source is modified.
-        </p>
-      </section>
-
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-sm font-medium text-zinc-300">Drives</h3>
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs font-medium text-zinc-300 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {loading ? "Refreshing" : "Refresh"}
-          </button>
-        </div>
-        {disks.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-700 p-6 text-center text-sm text-zinc-500">
-            No drives appeared. On Windows, run the app as administrator for
-            full disk access, or scan an image file below.
-          </div>
-        ) : (
-          <ul className="divide-y divide-zinc-800 overflow-hidden rounded-xl border border-zinc-800">
-            {disks.map((d) => (
-              <li
-                key={d.id}
-                className="flex items-center justify-between bg-zinc-900/60 p-3.5 transition-colors hover:bg-zinc-900"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    {d.display_name}
-                    {d.is_system && (
-                      <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400">
-                        System
-                      </span>
-                    )}
-                    {d.is_removable && (
-                      <span className="rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-400">
-                        Removable
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-0.5 text-xs text-zinc-500">
-                    {formatBytes(d.size_bytes)}
-                    {d.partitions.length > 0 &&
-                      ` with ${d.partitions.length} partition${d.partitions.length === 1 ? "" : "s"}`}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    onClick={() => onScan(d.id, false)}
-                    className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800"
-                  >
-                    Quick scan
-                  </button>
-                  <button
-                    onClick={() => onScan(d.id, true)}
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-all duration-200 hover:bg-blue-500"
-                  >
-                    Deep scan
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
+    <div className={`dw-disk-card${open ? " dw-open" : ""}`}>
+      <button
+        className="dw-disk-head"
+        onClick={() => hasParts && setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <span className="dw-disk-glyph">
+          <DiskGlyph disk={disk} />
+        </span>
+        <span className="dw-disk-id">
+          <span className="dw-disk-name dw-selectable-text">
+            {disk.display_name}
+            {disk.is_system && <span className="dw-tag dw-tag-amber">System</span>}
+            {disk.is_removable && <span className="dw-tag dw-tag-blue">Removable</span>}
+          </span>
+          <span className="dw-disk-meta">
+            {formatBytes(disk.size_bytes)} · {busLabel(disk.bus_type)}
+            {hasParts && ` · ${disk.partitions.length} partition${disk.partitions.length === 1 ? "" : "s"}`}
+          </span>
+        </span>
+        {hasParts && (
+          <span className={`dw-disk-caret${open ? " dw-open" : ""}`}>
+            <ChevronRightIcon size={15} />
+          </span>
         )}
-      </section>
+      </button>
 
-      <ImageEntry onScan={onScan} />
+      <div className="dw-disk-actions">
+        <button
+          className="dw-btn-outline dw-sm"
+          onClick={() =>
+            onScan(
+              { uri: disk.id, label: disk.display_name, detail: `Whole disk · ${busLabel(disk.bus_type)}`, partition: null },
+              false,
+            )
+          }
+        >
+          <PlayIcon size={14} />
+          Quick scan
+        </button>
+        <button
+          className="dw-btn-ink dw-sm"
+          onClick={() =>
+            onScan(
+              { uri: disk.id, label: disk.display_name, detail: `Whole disk · ${busLabel(disk.bus_type)}`, partition: null },
+              true,
+            )
+          }
+        >
+          <ScanSearchIcon size={15} />
+          Deep scan
+        </button>
+      </div>
 
-      {saved.length > 0 && (
-        <section>
-          <h3 className="mb-2 text-sm font-medium text-zinc-300">
-            Saved scans
-          </h3>
-          <ul className="divide-y divide-zinc-800 overflow-hidden rounded-xl border border-zinc-800">
-            {saved.map((s) => (
-              <li
-                key={s.scan_id}
-                className="flex items-center justify-between bg-zinc-900/60 p-3.5"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-zinc-200">
-                    {s.source_uri}
-                  </div>
-                  <div className="mt-0.5 text-xs text-zinc-500">
-                    {s.entries.toLocaleString()} entries, {s.mode} scan,
-                    saved {new Date(s.created_at).toLocaleString()}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    onClick={() => onResume(s.scan_id, false)}
-                    className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-200 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800"
-                  >
-                    Resume quick
-                  </button>
-                  <button
-                    onClick={() => onResume(s.scan_id, true)}
-                    className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-all duration-200 hover:bg-blue-500"
-                  >
-                    Resume deep
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {open && hasParts && (
+        <div className="dw-part-list dw-fade-in">
+          {disk.partitions.map((p) => (
+            <PartitionRow key={p.index} part={p} disk={disk} onScan={onScan} />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-function ImageEntry({
-  onScan,
-}: {
-  onScan: (sourceUri: string, deep: boolean) => void;
-}) {
-  const [path, setPath] = useState("");
+export function SelectSource({ onScan, onResume }: Props) {
+  const disks = useAppStore((s) => s.disks);
+  const loading = useAppStore((s) => s.disksLoading);
+  const error = useAppStore((s) => s.disksError);
+  const saved = useAppStore((s) => s.savedScans);
+  const savedLoading = useAppStore((s) => s.savedLoading);
+  const [picking, setPicking] = useState(false);
+  const [imgError, setImgError] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // The hidden input exists for the browser mock (real Tauri uses the
+  // native dialog). Chosen images become file://-style paths for display.
+  async function openImageDialog() {
+    setPicking(true);
+    setImgError(null);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const chosen = await open({
+        title: "Open a disk image",
+        multiple: false,
+        filters: [
+          { name: "Disk images", extensions: ["img", "dd", "raw", "vhd", "vhdx", "vmdk", "e01", "bin"] },
+        ],
+      });
+      if (typeof chosen === "string" && chosen.length > 0) {
+        onScan(
+          { uri: chosen, label: chosen.split(/[\\/]/).pop() ?? chosen, detail: "Disk image file", partition: null },
+          true,
+        );
+      }
+    } catch {
+      // Mock/browser fallback: the hidden file input path.
+      fileRef.current?.click();
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  function onMockFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    onScan(
+      { uri: `C:\\images\\${f.name}`, label: f.name, detail: "Disk image file", partition: null },
+      true,
+    );
+    e.target.value = "";
+  }
+
   return (
-    <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
-      <h3 className="mb-1 text-sm font-medium text-zinc-300">
-        Scan an image file
-      </h3>
-      <p className="mb-3 text-xs text-zinc-500">
-        Raw disk images (.img, .dd, .raw, .vhd) and single files carved with
-        the deep parsers.
-      </p>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={path}
-          onChange={(e) => setPath(e.target.value)}
-          placeholder="D:\images\disk.img"
-          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 transition-colors focus:border-blue-500 focus:outline-none"
-        />
-        <button
-          onClick={() => onScan(path, false)}
-          disabled={!path}
-          className="rounded-lg border border-zinc-700 px-3 py-2 text-sm font-medium text-zinc-200 transition-all duration-200 hover:border-zinc-600 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Quick
-        </button>
-        <button
-          onClick={() => onScan(path, true)}
-          disabled={!path}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition-all duration-200 hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Deep
-        </button>
+    <div className="dw-source-page">
+      <div className="dw-source-hero">
+        <div className="dw-source-hero-badge">
+          <WandIcon size={15} />
+          Free & open-source recovery
+        </div>
+        <h1 className="dw-source-title">Recover your files</h1>
+        <p className="dw-source-sub">
+          Pick the drive, partition or disk image where your files were lost.
+          Quick scans read the filesystem's own records; deep scans also carve
+          unallocated space byte-by-byte.
+        </p>
+        <div className="dw-trust-row">
+          {TRUST.map((t) => (
+            <span key={t} className="dw-trust-item">
+              <span className="dw-trust-check" aria-hidden />
+              {t}
+            </span>
+          ))}
+        </div>
       </div>
-    </section>
+
+      {error && (
+        <div className="dw-source-error" role="alert">
+          {error}
+        </div>
+      )}
+
+      <section className="dw-source-section">
+        <div className="dw-source-section-head">
+          <h2>Drives</h2>
+          <RefreshButton />
+        </div>
+
+        {loading ? (
+          <div className="dw-disk-skeletons">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="dw-skeleton dw-disk-skel" />
+            ))}
+          </div>
+        ) : disks.length === 0 ? (
+          <div className="dw-source-empty">
+            <HardDriveIcon size={26} />
+            <p className="dw-source-empty-title">No drives appeared</p>
+            <p className="dw-source-empty-sub">
+              On Windows, run Data Wizard as administrator for full disk access —
+              or open a disk image below instead.
+            </p>
+          </div>
+        ) : (
+          <div className="dw-disk-list">
+            {disks.map((d) => (
+              <DiskCard key={d.id} disk={d} onScan={onScan} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="dw-source-duo">
+        <section className="dw-source-section dw-image-card">
+          <div className="dw-source-section-head">
+            <h2>Disk image</h2>
+          </div>
+          <button className="dw-image-cta" onClick={openImageDialog} disabled={picking}>
+            <span className="dw-image-cta-icon">
+              <DatabaseIcon size={20} />
+            </span>
+            <span className="dw-image-cta-text">
+              <span className="dw-image-cta-title">Open a disk image</span>
+              <span className="dw-image-cta-sub">RAW · IMG · DD · VHD · VHDX · VMDK · E01</span>
+            </span>
+          </button>
+          {imgError && <p className="dw-image-error">{imgError}</p>}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".img,.dd,.raw,.vhd,.vhdx,.vmdk,.e01,.bin"
+            style={{ display: "none" }}
+            onChange={onMockFileChosen}
+            aria-label="Disk image file"
+          />
+          <p className="dw-image-note">
+            Scanning an image is the safest first step: the original media stays
+            untouched while you verify what can be recovered.
+          </p>
+        </section>
+
+        <section className="dw-source-section">
+          <div className="dw-source-section-head">
+            <h2>Saved scans</h2>
+          </div>
+          {savedLoading ? (
+            <div className="dw-skeleton dw-saved-skel" />
+          ) : saved.length === 0 ? (
+            <div className="dw-saved-empty">
+              <HistoryIcon size={20} />
+              <p>No saved scans yet. Finish a scan and save it to resume later.</p>
+            </div>
+          ) : (
+            <ul className="dw-saved-list">
+              {saved.slice(0, 4).map((s) => (
+                <li key={s.scan_id} className="dw-saved-row">
+                  <span className="dw-saved-glyph">
+                    <ClockIcon size={15} />
+                  </span>
+                  <span className="dw-saved-id">
+                    <span className="dw-saved-source dw-selectable-text" title={s.source_uri}>
+                      {s.source_uri.split(/[\\/]/).pop() ?? s.source_uri}
+                    </span>
+                    <span className="dw-saved-meta">
+                      {s.mode === "deep" ? "Deep" : "Quick"} · {s.entries.toLocaleString()} files · {timeAgo(s.created_at)}
+                    </span>
+                  </span>
+                  <button className="dw-btn-ghost" onClick={() => onResume(s)}>
+                    Resume
+                    <ChevronRightIcon size={13} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function RefreshButton() {
+  const setDisks = useAppStore((s) => s.setDisks);
+  const setLoading = useAppStore((s) => s.setDisksLoading);
+  const setError = useAppStore((s) => s.setDisksError);
+  const loading = useAppStore((s) => s.disksLoading);
+  const [spinning, setSpinning] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    setError(null);
+    setSpinning(true);
+    try {
+      const res = await invoke<{ disks: DiskInfo[] }>("list_disks", { req: {} });
+      setDisks(res.disks ?? []);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+      window.setTimeout(() => setSpinning(false), 350);
+    }
+  }
+
+  return (
+    <button className="dw-btn-ghost" onClick={refresh} disabled={loading}>
+      <RefreshIcon size={14} className={spinning ? "dw-spin" : undefined} />
+      {loading ? "Refreshing…" : "Refresh"}
+    </button>
   );
 }

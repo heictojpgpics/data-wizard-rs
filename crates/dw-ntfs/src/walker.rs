@@ -118,6 +118,10 @@ struct CollectedRecord {
     is_deleted: bool,
     #[allow(dead_code)]
     is_directory: bool,
+    /// Resident $INDEX_ROOT content (live directories only).
+    index_root: Option<Vec<u8>>,
+    /// Decoded $INDEX_ALLOCATION runs (live directories only).
+    index_alloc_runs: Option<Vec<crate::mft::DataRun>>,
     mtime: Option<time::OffsetDateTime>,
     ctime: Option<time::OffsetDateTime>,
     atime: Option<time::OffsetDateTime>,
@@ -134,6 +138,22 @@ pub struct WalkOutcome {
     /// $Bitmap (MFT record 6) $DATA extents + size, captured during the
     /// walk so the deep phase can carve ONLY unallocated clusters.
     pub bitmap: Option<(Vec<Extent>, u64)>,
+    /// Records surfaced by the MFT pass (the $I30 pass skips these).
+    pub surfaced: std::collections::HashSet<u64>,
+    /// Live directory record -> its own path (parent for $I30 finds).
+    pub record_paths: HashMap<u64, String>,
+    /// Live directories' index data for the $I30 pass.
+    pub dirs: Vec<DirIndexes>,
+}
+
+/// One live directory's index data for the deep $I30 pass.
+#[derive(Debug)]
+pub struct DirIndexes {
+    pub record_number: u64,
+    /// Resident $INDEX_ROOT content (raw), if present.
+    pub root: Option<Vec<u8>>,
+    /// INDX block windows (byte offset, byte length) after run decoding.
+    pub blocks: Vec<(u64, u64)>,
 }
 
 pub async fn walk_mft(
@@ -318,6 +338,28 @@ pub async fn walk_mft(
             bitmap_capture = Some((extents.clone(), file_size));
         }
 
+        // Stash the directory index for the deep $I30 pass (live dirs).
+        let (index_root, index_alloc_runs) = if record.is_directory() && !is_deleted {
+            let root = record
+                .attributes
+                .iter()
+                .find(|a| a.attr_type == crate::mft::attr_type::INDEX_ROOT)
+                .and_then(|a| a.resident_content().map(<[u8]>::to_vec));
+            let alloc = record
+                .attributes
+                .iter()
+                .find(|a| a.attr_type == crate::mft::attr_type::INDEX_ALLOCATION)
+                .and_then(|a| match &a.data {
+                    crate::mft::AttributeData::NonResident { run_list, .. } => {
+                        crate::mft::decode_run_list(run_list).ok()
+                    }
+                    _ => None,
+                });
+            (root, alloc)
+        } else {
+            (None, None)
+        };
+
         collected.push(CollectedRecord {
             record_number,
             parent_record_number: file_name.parent_record_number,
@@ -329,6 +371,8 @@ pub async fn walk_mft(
             is_partial,
             is_deleted,
             is_directory: record.is_directory(),
+            index_root,
+            index_alloc_runs,
             mtime: file_name.modification_time,
             ctime: file_name.creation_time,
             atime: file_name.read_time,
@@ -377,8 +421,17 @@ pub async fn walk_mft(
         .await;
 
     let mut entries_emitted: u64 = 0;
+    let mut surfaced: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    let mut record_paths: HashMap<u64, String> = HashMap::new();
     for r in &collected {
-        let parent_path = resolve_path(r.record_number, &parent_map);
+        // The record's OWN path; the entry's parent_path is its parent
+        // directory (consistent with the other engines).
+        let own_path = resolve_path(r.record_number, &parent_map);
+        let parent_path = parent_dir_of(&own_path);
+        surfaced.insert(r.record_number);
+        if r.is_directory && !r.is_deleted {
+            record_paths.insert(r.record_number, own_path.clone());
+        }
 
         let extension = r
             .name
@@ -389,7 +442,7 @@ pub async fn walk_mft(
         let mut entry = RecoveredEntry {
             id: RecoveredEntryId(Uuid::now_v7()),
             fs_kind: "ntfs".to_string(),
-            parent_path,
+            parent_path: parent_path.clone(),
             name: r.name.clone(),
             size: r.file_size,
             start_lba: None, // recomputed from extents below
@@ -427,10 +480,180 @@ pub async fn walk_mft(
         })
         .await;
 
+    // Build the $I30 pass inputs from live directories.
+    let dirs: Vec<DirIndexes> = collected
+        .iter()
+        .filter(|r| {
+            r.is_directory
+                && !r.is_deleted
+                && (r.index_root.is_some() || r.index_alloc_runs.is_some())
+        })
+        .map(|r| DirIndexes {
+            record_number: r.record_number,
+            root: r.index_root.clone(),
+            blocks: index_block_windows(
+                r.index_alloc_runs.as_deref(),
+                u64::from(vbr.bytes_per_cluster),
+                u64::from(vbr.index_record_size_bytes),
+            ),
+        })
+        .collect();
+
     Ok(WalkOutcome {
         entries: entries_emitted,
         bitmap: bitmap_capture,
+        surfaced,
+        record_paths,
+        dirs,
     })
+}
+
+/// Split $INDEX_ALLOCATION runs into INDX block windows.
+/// Bounded: at most 4096 blocks per directory.
+fn index_block_windows(
+    runs: Option<&[crate::mft::DataRun]>,
+    bytes_per_cluster: u64,
+    index_record_size: u64,
+) -> Vec<(u64, u64)> {
+    const MAX_BLOCKS_PER_DIR: usize = 4096;
+    let mut out = Vec::new();
+    let Some(runs) = runs else { return out };
+    if index_record_size == 0 || !index_record_size.is_multiple_of(512) {
+        return out;
+    }
+    for run in runs {
+        let Some(start) = run.offset else { continue }; // sparse hole
+        let run_bytes = run.length.saturating_mul(bytes_per_cluster);
+        if run_bytes == 0 {
+            continue;
+        }
+        let base = start * bytes_per_cluster;
+        let mut off = 0u64;
+        while off < run_bytes {
+            if out.len() >= MAX_BLOCKS_PER_DIR {
+                return out;
+            }
+            let len = index_record_size.min(run_bytes - off);
+            if len < index_record_size {
+                break;
+            } // partial tail block: skip
+            out.push((base + off, len));
+            off += len;
+        }
+    }
+    out
+}
+
+/// Strip the last component of a backslash path (file's own name),
+/// yielding the parent directory's path.
+fn parent_dir_of(own_path: &str) -> String {
+    match own_path.rfind('\\') {
+        Some(0) | None => "\\".to_string(),
+        Some(i) => own_path[..i].to_string(),
+    }
+}
+
+/// Deep pass: names from surviving $I30 directory indexes for records
+/// the MFT pass could not surface (damaged/lost MFT records).
+///
+/// Each find carries the name, parent path, sizes and timestamps from
+/// the index key's $FILE_NAME; content extents live in the lost record,
+/// so entries are honestly marked PartiallyRecovered (metadata only).
+pub async fn index_pass(
+    source: &Arc<dyn DiskSource>,
+    results: &Arc<ResultsStore>,
+    outcome: &WalkOutcome,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+) -> u64 {
+    use crate::index::{IndexEntry, parse_index_root, parse_indx_block};
+    use dw_core::results::{RecoveredEntry, RecoveredEntryId, RecoveryStatus};
+    use uuid::Uuid;
+
+    const MAX_BLOCKS_TOTAL: usize = 65536;
+    let read = source.as_read_at();
+    let mut emitted = 0u64;
+    let mut blocks_read = 0usize;
+
+    for dir in &outcome.dirs {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        let mut entries: Vec<IndexEntry> = Vec::new();
+        if let Some(root) = &dir.root
+            && let Ok(v) = parse_index_root(root)
+        {
+            entries.extend(v);
+        }
+        for (off, len) in &dir.blocks {
+            if blocks_read >= MAX_BLOCKS_TOTAL {
+                break;
+            }
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            let mut buf = vec![0u8; *len as usize];
+            if read.read_at(*off, &mut buf).is_err() {
+                continue;
+            }
+            blocks_read += 1;
+            if let Ok(v) = parse_indx_block(&buf) {
+                entries.extend(v);
+            }
+        }
+        for e in entries {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                break;
+            }
+            let Some(key) = &e.key else { continue };
+            let rec = e.record_number();
+            // The MFT pass surfaces every record it can parse (live AND
+            // deleted); only records it could NOT surface reach us.
+            if outcome.surfaced.contains(&rec) {
+                continue;
+            }
+            if key.name.is_empty() || key.real_size == 0 && key.allocated_size == 0 {
+                continue;
+            }
+            let parent_path = outcome
+                .record_paths
+                .get(&key.parent_record_number)
+                .cloned()
+                .unwrap_or_else(|| "\\".to_string());
+            let extension = key
+                .name
+                .rsplit_once('.')
+                .map(|(_, x)| x.to_lowercase())
+                .unwrap_or_default();
+            let entry = RecoveredEntry {
+                id: RecoveredEntryId(Uuid::now_v7()),
+                fs_kind: "ntfs".to_string(),
+                parent_path,
+                name: key.name.clone(),
+                size: key.real_size.max(key.allocated_size),
+                start_lba: None,
+                mtime: key.modification_time,
+                ctime: key.creation_time,
+                atime: key.read_time,
+                status: RecoveryStatus::PartiallyRecovered,
+                extension,
+                mime: None,
+                confidence: 400,
+                was_deleted: true,
+                cluster_chain: Vec::new(),
+                extents: Vec::new(),
+                resident_data: None,
+            };
+            results.insert(entry);
+            emitted += 1;
+        }
+    }
+    if emitted > 0 {
+        info!(
+            emitted,
+            blocks_read, "ntfs $I30 pass surfaced lost-record names"
+        );
+    }
+    emitted
 }
 
 /// Resolve the full path of a record by walking up the parent chain.
@@ -647,5 +870,16 @@ mod tests {
         map.insert(5u64, (5u64, "."));
         let path = resolve_path(5, &map);
         assert_eq!(path, "\\");
+    }
+
+    #[test]
+    fn parent_dir_of_drops_last_component() {
+        assert_eq!(super::parent_dir_of("\\test.txt"), "\\");
+        assert_eq!(
+            super::parent_dir_of("\\Users\\alice\\doc.txt"),
+            "\\Users\\alice"
+        );
+        assert_eq!(super::parent_dir_of("\\[cycle]\\x"), "\\[cycle]");
+        assert_eq!(super::parent_dir_of("\\[orphan]"), "\\");
     }
 }

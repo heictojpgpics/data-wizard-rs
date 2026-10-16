@@ -9,7 +9,6 @@ members = [
     "crates/dw-ext",
     "crates/dw-hfs",
     "crates/dw-btrfs",
-    "crates/dw-refs",
     "crates/dw-zfs",
     "crates/dw-signatures",
     "crates/dw-carver",
@@ -79,7 +78,6 @@ dw-exfat      = { path = "crates/dw-exfat" }
 dw-ext        = { path = "crates/dw-ext" }
 dw-hfs        = { path = "crates/dw-hfs" }
 dw-btrfs      = { path = "crates/dw-btrfs" }
-dw-refs       = { path = "crates/dw-refs" }
 dw-zfs        = { path = "crates/dw-zfs" }
 dw-signatures = { path = "crates/dw-signatures" }
 dw-carver     = { path = "crates/dw-carver" }

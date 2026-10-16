@@ -1,36 +1,39 @@
 //! # dw-ext
 //!
-//! ext2 / ext3 / ext4 filesystem parser plugin for `data-wizard-rs`.
+//! ext2 / ext3 / ext4 filesystem engine for `data-wizard-rs`.
 //!
-//! Recovery strategy (clean-room, derived from `e2fsprogs` source +
-//! Linux kernel `fs/ext4/` + the ext4 documentation in the kernel tree):
+//! Clean-room implementation against the public on-disk format (Linux
+//! kernel `fs/ext4/ext4.h` layouts; `e2fsprogs` semantics), cross-checked
+//! against the reference product's module map (see
+//! `open-recovery-wizard/docs/08-driver-and-module-re.md`).
 //!
-//!  1. **Probe**: Read superblock at offset 1024, verify magic 0xEF53,
-//!     parse feature flags to determine ext2 vs ext3 vs ext4.
-//!  2. **Quick scan**:
-//!     - Parse block-group descriptors (32 or 64 bytes each).
-//!     - For each block group: walk the inode table, applying the
-//!       inode bitmap as a "live" filter.
-//!       - Deleted inodes have their bitmap bit clear but the inode
-//!         struct on-disk often still has dtime set and the i_blocks
-//!         array intact.
-//!     - Follow extent trees (ext4) or indirect block maps (ext2/3).
-//!  3. **Deep scan**:
-//!     - For each block not in any block bitmap as "allocated": apply
-//!       raw carving.
-//!     - Use the journal (if ext3/4) to recover recently-deleted inodes
-//!       whose block pointers were overwritten by the journal commit.
+//! Scan phases:
+//!
+//! 1. **Quick** - live metadata walk from root inode 2 (extent trees and
+//!    legacy indirect maps, content-order physical extents for fragmented
+//!    files), plus the shadow-dirent pass: directory blocks are scanned
+//!    for structurally valid entries the live chain skips, so recently
+//!    deleted files surface with their real names.
+//! 2. **Deep** - quick + the orphan pass (unallocated inodes whose
+//!    on-disk records still describe files) + free-block carving through
+//!    the shared signature carver, restricted to the block bitmaps' free
+//!    runs so live files are never duplicated.
+//!
+//! Journal-based deleted-dirent recovery (jbd2) is a documented roadmap
+//! item; it is not implemented and nothing pretends otherwise.
 
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+pub mod dir;
 pub mod error;
 pub mod extent;
 pub mod group;
 pub mod inode;
-pub mod journal;
 pub mod plugin;
 pub mod superblock;
+pub mod walker;
 
 pub use error::{ExtError, ExtResult};
+pub use inode::Inode;
 pub use plugin::ExtPlugin;
