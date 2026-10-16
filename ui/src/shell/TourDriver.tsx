@@ -50,8 +50,12 @@ function tourTitle(i: number, name: string) {
     });
 }
 
+/** The tour-done marker carries the found-file count so CI can assert
+ * the scan actually recovered the staged population (green-on-empty
+ * hid a vhdmp stall for several runs). */
 function tourTitleEnd() {
-  const title = "Data Wizard · tour-done";
+  const found = useResultsStore.getState().total;
+  const title = `Data Wizard · tour-done-${found}`;
   document.title = title;
   import("@tauri-apps/api/window")
     .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title))

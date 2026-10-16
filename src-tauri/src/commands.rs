@@ -22,7 +22,7 @@ use dw_ipc::types as dto;
 use crate::state::{AppState, ScanRecord};
 
 /// Resolve the on-disk checkpoint directory (app data dir / checkpoints).
-fn checkpoint_dir(state: &State<'_, Arc<RwLock<AppState>>>) -> PathBuf {
+fn checkpoint_dir(state: &Arc<RwLock<AppState>>) -> PathBuf {
     use tauri::Manager;
     let app = state.read().app.clone();
     let dir = app
@@ -35,7 +35,7 @@ fn checkpoint_dir(state: &State<'_, Arc<RwLock<AppState>>>) -> PathBuf {
 }
 
 /// Scratch dir for results-store spill files.
-fn spills_dir(state: &State<'_, Arc<RwLock<AppState>>>) -> PathBuf {
+fn spills_dir(state: &Arc<RwLock<AppState>>) -> PathBuf {
     use tauri::Manager;
     let app = state.read().app.clone();
     let dir = app
@@ -73,6 +73,22 @@ async fn probe_partition_fs(view: &PartitionView) -> Option<String> {
     None
 }
 
+/// Open a scan/recovery source with a hard timeout: a source that
+/// stops responding (an image file still ATTACHED to the host — the
+/// vhdmp filter contends its reads; the CI tour caught exactly this)
+/// surfaces as a clear error instead of hanging the invoke forever.
+async fn open_source_guarded(path: &Path) -> Result<Arc<dyn DiskSource>, String> {
+    let owned = path.to_path_buf();
+    tokio::time::timeout(std::time::Duration::from_secs(20), async move {
+        tokio::task::spawn_blocking(move || open_source(&owned)).await
+    })
+    .await
+    .map_err(|_| {
+        "the source stopped responding within 20s — is the disk image still attached/mounted elsewhere?".to_string()
+    })?
+    .map_err(|e| format!("source open task: {e}"))?
+}
+
 /// Open a scan/recovery source: raw Windows devices go through
 /// `WindowsRawSource`, everything else through `FileBackedSource`.
 fn open_source(path: &Path) -> Result<Arc<dyn DiskSource>, String> {
@@ -107,10 +123,15 @@ pub async fn list_disks(
 
 #[tauri::command]
 pub async fn start_scan(
-    state: State<'_, Arc<RwLock<AppState>>>,
+    _state: State<'_, Arc<RwLock<AppState>>>,
     req: StartScanRequest,
 ) -> Result<StartScanResponse, String> {
     info!(source = %req.source_uri, deep = req.deep, "start_scan");
+
+    // The tauri State handle carries a raw pointer (not Send); the
+    // guarded source open awaits, so convert to the plain Arc first
+    // and never touch the handle again.
+    let state: Arc<RwLock<AppState>> = _state.inner().clone();
 
     let mode = if req.deep {
         dw_core::ScanMode::Deep
@@ -128,7 +149,8 @@ pub async fn start_scan(
 
     // Open the source.
     let source_path = parse_source_uri(&req.source_uri)?;
-    let file_source = open_source(&source_path)?;
+    let file_source = open_source_guarded(&source_path).await?;
+    info!("start_scan: source opened (paused-gate wrap next)");
 
     // Optionally narrow to one partition inside the source.
     let source: Arc<dyn DiskSource> = match req.partition {
@@ -176,6 +198,7 @@ pub async fn start_scan(
         Arc::clone(&pause),
     ));
     let record = ScanRecord::new(handle.clone(), req.source_uri.clone(), pause);
+    info!(scan_id = %scan_id, "start_scan: record built, spawning task");
 
     let plugins = all_plugins();
 
@@ -192,10 +215,11 @@ pub async fn start_scan(
         g.scans.insert(scan_id, record);
     }
 
-    let state_clone = Arc::clone(state.inner());
+    let state_clone = Arc::clone(&state);
     tokio::spawn(async move {
         info!(scan_id = %scan_id, "Scan task started");
         let result = scan.run().await;
+        info!(scan_id = %scan_id, ok = result.is_ok(), "Scan task finished");
         match &result {
             Ok(outcome) => {
                 // No plugin recognized the source: run the raw-carving
@@ -224,7 +248,7 @@ pub async fn start_scan(
                             Ok(p) => p,
                             Err(_) => return,
                         };
-                        if let Ok(src) = open_source(&source_path) {
+                        if let Ok(src) = open_source_guarded(&source_path).await {
                             // Gate the fallback's reads with the same
                             // pause flag the record owns.
                             let gate = {
@@ -335,6 +359,7 @@ pub async fn start_scan(
         }
     });
 
+    info!(scan_id = %scan_id, "start_scan: returning scan_id to the UI");
     Ok(StartScanResponse {
         scan_id: scan_id.to_string(),
     })
@@ -702,23 +727,28 @@ fn parse_source_uri(uri: &str) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub async fn save_scan(
-    state: State<'_, Arc<RwLock<AppState>>>,
+    _state: State<'_, Arc<RwLock<AppState>>>,
     req: SaveScanRequest,
 ) -> Result<SaveScanResponse, String> {
     let id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
     info!(scan_id = %id, "save_scan");
 
-    let g = state.read();
-    let record = g
-        .scans
-        .get(&id)
-        .ok_or_else(|| "scan not found".to_string())?;
-    let source_uri = record.source_uri.clone();
-    drop(g);
+    // Send-safe state (awaits below).
+    let state: Arc<RwLock<AppState>> = _state.inner().clone();
+
+    // Collect under a SHORT lock; the guard never crosses the await.
+    let source_uri = {
+        let g = state.read();
+        let record = g
+            .scans
+            .get(&id)
+            .ok_or_else(|| "scan not found".to_string())?;
+        record.source_uri.clone()
+    };
 
     // Re-open the source for fingerprinting (read-only).
     let path = parse_source_uri(&source_uri)?;
-    let source = open_source(&path)?;
+    let source = open_source_guarded(&path).await?;
 
     let g = state.read();
     let record = g
@@ -765,11 +795,14 @@ pub async fn resume_scan(
     let id = uuid::Uuid::parse_str(&req.saved_scan_id).map_err(|e| e.to_string())?;
     info!(saved_scan_id = %id, deep = req.deep, "resume_scan");
 
+    // Send-safe state (awaits below).
+    let state: Arc<RwLock<AppState>> = state.inner().clone();
+
     // Load + verify against the current source.
     let store = dw_core::CheckpointStore::new(checkpoint_dir(&state));
     let cp = store.load(id).map_err(|e| e.to_string())?;
     let path = parse_source_uri(&cp.source_uri)?;
-    let source = open_source(&path)?;
+    let source = open_source_guarded(&path).await?;
     dw_core::verify_source_matches(&cp, source.as_read_at().as_ref())
         .map_err(|e| format!("refusing to resume: {e}"))?;
 
@@ -813,7 +846,7 @@ pub async fn resume_scan(
         g.scans.insert(scan_id, record);
     }
 
-    let state_clone = Arc::clone(state.inner());
+    let state_clone = Arc::clone(&state);
     let mode = config.mode;
     tokio::spawn(async move {
         info!(scan_id = %scan_id, "Resumed scan task started");
@@ -865,8 +898,11 @@ pub async fn list_partitions(
     req: ListPartitionsRequest,
 ) -> Result<ListPartitionsResponse, String> {
     info!(source = %req.source_uri, "list_partitions called");
+    // The guarded open awaits; the State handle (non-Send) is consumed
+    // here and never touched again.
+    let _state_arc = _state.inner().clone();
     let path = parse_source_uri(&req.source_uri)?;
-    let source = open_source(&path)?;
+    let source = open_source_guarded(&path).await?;
     let read_at = source.as_read_at();
 
     let table = dw_disk::discover_partitions(read_at.as_ref())

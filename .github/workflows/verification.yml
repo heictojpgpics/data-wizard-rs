@@ -58,7 +58,7 @@ jobs:
           New-Item -ItemType Directory -Path T:\Images -Force
           "important document" | Out-File -FilePath T:\Docs\notes.txt -Encoding utf8
 
-          "select vdisk file=`"$vhd`"ndetach vdisk`nexit" | diskpart
+          "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart
           Write-Host "VHD created: $vhd"
 
       - name: Run dw-scan against VHD
@@ -130,7 +130,7 @@ jobs:
             Remove-Item "U:\TestFiles\file$_.txt"
           }
 
-          "select vdisk file=`"$vhd`"ndetach vdisk`nexit" | diskpart
+          "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart
           Write-Host "FAT32 VHD created: $vhd"
 
       - name: Run dw-scan against VHD (quick + deep)
@@ -204,7 +204,7 @@ jobs:
           }
           $frag.Close()
 
-          "select vdisk file=`"$vhd`"ndetach vdisk`nexit" | diskpart
+          "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart
           Write-Host "exFAT VHD created: $vhd"
 
       - name: Run dw-scan against VHD (quick + deep)
@@ -269,7 +269,7 @@ jobs:
           "ntfs partition file" | Out-File -FilePath Y:\N\a.txt -Encoding utf8
           New-Item -ItemType Directory -Path Z:\F -Force
           "fat32 partition file" | Out-File -FilePath Z:\F\b.txt -Encoding utf8
-          "select vdisk file=`"$vhd`"ndetach vdisk`nexit" | diskpart
+          "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart
           Write-Host "GPT VHD created"
 
       - name: Verify partition listing + per-partition scans

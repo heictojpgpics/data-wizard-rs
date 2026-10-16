@@ -135,8 +135,19 @@ jobs:
           # Detach so the app scans the VHD FILE (FileBackedSource) —
           # the same path every green verification run uses; raw
           # \\.\T: volume opens fail in the runner context.
-          "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart | Out-Null
-          Start-Sleep -Seconds 3
+          # RETRY + VERIFY: a transient handle on T: (Defender/indexer)
+          # fails detach vdisk silently (Out-Null eats it) and the app
+          # would then read an ATTACHED vhd — vhdmp filter contention
+          # stalled the whole scan (the runner diagnostics showed the
+          # still-attached "Msft Virtual Disk 1.0" at tour time).
+          $detached = $false
+          for ($try = 1; $try -le 8; $try++) {
+            "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart | Out-Null
+            Start-Sleep -Seconds 2
+            if (-not (Test-Path "T:\")) { $detached = $true; break }
+            "detach attempt $try failed (T: still present) — retrying"
+          }
+          if (-not $detached) { throw "could not detach the tour VHD — T: remains mounted" }
           "vhd detached for file-backed scanning"
       - name: Storage-stack diagnostics pre-check (crash isolation)
         shell: pwsh
@@ -214,10 +225,15 @@ jobs:
           $frames = 0
           $sawMarker = $false
           $shot = New-Object 'System.Collections.Generic.HashSet[string]'
+          $doneTitle = ''
           while ((Get-Date) -lt $deadline -and -not $app.HasExited) {
             $t = WindowTitle
             if ($t -and $t -ne $lastTitle) {
-              if ($t -match '· tour-done') { "tour finished after $frames frames"; break }
+              if ($t -match '· (tour-done-\d+)') {
+                $doneTitle = $Matches[1]
+                "tour finished after $frames frames ($doneTitle)"
+                break
+              }
               if ($t -match '· (t\d{2}-[a-z0-9-]+)') {
                 $marker = $Matches[1]
                 if (-not $shot.Contains($marker)) {
@@ -241,6 +257,20 @@ jobs:
               $lastTitle = $t
             }
             Start-Sleep -Milliseconds 250
+          }
+
+          # ── SCAN-SUCCESS ASSERTION: an empty tour scan means the
+          # staged volume never got recovered (attached-VHD stall, fs
+          # probe failure, carve miss). Green-on-empty hid exactly that
+          # for several runs — fail loudly instead.
+          if ($doneTitle) {
+            $found = [int]($doneTitle -replace '\D', '')
+            if ($found -le 0) {
+              throw "tour completed but the scan found 0 entries — the staged VHD population was not recovered (check app-stdout for the start_scan instrumentation)"
+            }
+            "scan assertion passed: $found entries recovered on the tour source"
+          } else {
+            Write-Host "::warning::tour-done marker never carried a count (old tour build?) — skipping the empty-scan assertion"
           }
 
           # ── FALLBACK: no title markers (tour env missing / title sync
