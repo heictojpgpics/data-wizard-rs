@@ -183,9 +183,7 @@ fn query_physical_drive(path: &str, index: u32) -> Option<PhysicalDriveInfo> {
         Some(s) if s > 0 => s,
         _ => return None, // no authoritative size -> not a real usable disk
     };
-    let (bytes_per_sector, _disk_size_geom) = disk_geometry(handle.0)
-        .map(|(bps, sz)| (bps, sz))
-        .unwrap_or((512, size));
+    let (bytes_per_sector, _disk_size_geom) = disk_geometry(handle.0).unwrap_or((512, size));
     let descriptor = storage_device_descriptor(handle.0);
 
     let (model, serial, bus, removable_media) = match &descriptor {
@@ -257,8 +255,8 @@ pub fn enumerate_volumes() -> Vec<VolumeEntry> {
             _ => VolumeKind::Unknown,
         };
 
-        let (label, fs_name) = volume_label_fs(&root);
-        let (total, free) = volume_space(&root);
+        let (label, fs_name) = volume_label_fs(root);
+        let (total, free) = volume_space(root);
         let (disk_number, extent_start, extent_len) = volume_disk_extents(&letter);
 
         out.push(VolumeEntry {
@@ -473,7 +471,7 @@ fn storage_device_descriptor(handle: HANDLE) -> Option<DeviceDescriptor> {
 fn bus_from_storage_bus_type(v: u32) -> StorageBus {
     match v {
         0 => StorageBus::Unknown,
-        1 | 2 | 3 => StorageBus::Ata,  // Scsi, Atapi, Ata
+        1..=3 => StorageBus::Ata,  // Scsi, Atapi, Ata
         4 => StorageBus::FireWire,     // 1394
         5 => StorageBus::FibreChannel, // SSA treated as FC family
         6 => StorageBus::FibreChannel,

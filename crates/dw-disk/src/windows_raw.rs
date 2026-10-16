@@ -119,16 +119,14 @@ fn query_size(handle: HANDLE) -> DiskResult<u64> {
             None,
         )
     };
-    if let Ok(()) = ok {
-        if returned >= 8 {
-            if let Ok(b) = out[..8].try_into() {
+    if let Ok(()) = ok
+        && returned >= 8
+            && let Ok(b) = out[..8].try_into() {
                 let len = i64::from_le_bytes(b);
                 if len > 0 {
                     return Ok(len as u64);
                 }
             }
-        }
-    }
     Err(DiskError::Windows(
         "IOCTL_DISK_GET_LENGTH_INFO failed for device handle".into(),
     ))

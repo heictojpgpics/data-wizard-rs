@@ -132,6 +132,21 @@ jobs:
           $kept = (Get-ChildItem "T:\" -Recurse -File | Measure-Object).Count
           "staged $kept surviving entries (the deleted population is what the scan recovers)"
 
+      - name: Storage-stack diagnostics pre-check (crash isolation)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $exe = Join-Path $PWD "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
+          $diag = "$env:RUNNER_TEMP\diag-stdout.log"
+          $diagErr = "$env:RUNNER_TEMP\diag-stderr.log"
+          $p = Start-Process $exe -ArgumentList "--diagnostics" -Wait -PassThru -RedirectStandardOutput $diag -RedirectStandardError $diagErr
+          "diagnostics exit code: $($p.ExitCode) (0 = healthy; -1073741819 = 0xC0000005 access violation; 1/2 = storage verdicts)"
+          "--- diagnostics stdout ---"
+          Get-Content $diag -ErrorAction SilentlyContinue | Select-Object -First 60 | ForEach-Object { Write-Host $_ }
+          "--- diagnostics stderr ---"
+          Get-Content $diagErr -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object { Write-Host $_ }
+          if ($p.ExitCode -eq -1073741819) { throw "storage stack crashed with an access violation" }
+
       - name: Run the app + capture the tour (title-synced, one frame per step)
         shell: pwsh
         run: |
@@ -231,11 +246,13 @@ jobs:
           }
           if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
           Start-Sleep -Milliseconds 500
-          # Rust panics + tracing land in stderr; the webview console is
-          # not reachable from the harness — these logs make the next
-          # hang/blank diagnosis a download instead of a guess.
+          "app exit code: $($app.ExitCode) (0xC0000005 access violation shows as -1073741819)"
+          "--- app-stdout tail (tracing goes here) ---"
+          if (Test-Path "$env:RUNNER_TEMP\app-stdout.log") {
+            Get-Content "$env:RUNNER_TEMP\app-stdout.log" -Tail 60
+          }
+          "--- app-stderr tail (panics go here) ---"
           if (Test-Path "$env:RUNNER_TEMP\app-stderr.log") {
-            "--- app-stderr tail ---"
             Get-Content "$env:RUNNER_TEMP\app-stderr.log" -Tail 40
           }
           Get-ChildItem $out | ForEach-Object { "captured $($_.Name)" }
@@ -259,11 +276,14 @@ jobs:
           if-no-files-found: error
 
       - name: Upload app logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: datawizard-app-logs
           path: |
             ${{ runner.temp }}/app-stdout.log
             ${{ runner.temp }}/app-stderr.log
+            ${{ runner.temp }}/diag-stdout.log
+            ${{ runner.temp }}/diag-stderr.log
           retention-days: 14
           if-no-files-found: warn
