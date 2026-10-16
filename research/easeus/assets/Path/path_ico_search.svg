@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>path_ico_search</title>
+    <g id="path_ico_search" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <path d="M11,2 C15.9705627,2 20,6.02943725 20,11 C20,12.943584 19.383916,14.7432739 18.3363832,16.2144345 L21.1213203,19 C21.7071068,19.5857864 21.7071068,20.5355339 21.1213203,21.1213203 C20.5355339,21.7071068 19.5857864,21.7071068 19,21.1213203 L16.2144345,18.3363832 C14.7432739,19.383916 12.943584,20 11,20 C6.02943725,20 2,15.9705627 2,11 C2,6.02943725 6.02943725,2 11,2 Z" id="形状结合" fill="#2E3644"></path>
+        <circle id="椭圆形" fill="#FFFFFF" cx="11" cy="11" r="7"></circle>
+    </g>
+</svg>

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="20px" height="16px" viewBox="0 0 20 16" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>ico_open_vip</title>
+    <defs>
+        <linearGradient x1="11.8534483%" y1="25.1958333%" x2="89.9896731%" y2="82%" id="linearGradient-1">
+            <stop stop-color="#CD932D" offset="0%"></stop>
+            <stop stop-color="#A67012" offset="100%"></stop>
+        </linearGradient>
+        <polygon id="path-2" points="4 -2.24265051e-14 16 -2.24265051e-14 20 6 10 16 2.27873276e-13 6"></polygon>
+        <linearGradient x1="11.8534483%" y1="45.3916159%" x2="89.9896731%" y2="55.9453032%" id="linearGradient-4">
+            <stop stop-color="#C18723" offset="0%"></stop>
+            <stop stop-color="#FFDC9D" offset="100%"></stop>
+        </linearGradient>
+    </defs>
+    <g id="ico_open_vip" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <mask id="mask-3" fill="white">
+            <use xlink:href="#path-2"></use>
+        </mask>
+        <use id="路径" fill="url(#linearGradient-1)" xlink:href="#path-2"></use>
+        <rect id="矩形" fill="url(#linearGradient-4)" mask="url(#mask-3)" x="-4" y="-4" width="29" height="10"></rect>
+    </g>
+</svg>

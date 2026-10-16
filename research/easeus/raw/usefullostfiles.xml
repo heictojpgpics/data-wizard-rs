@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<type>
+    <ext>jpg</ext> 
+    <ext>cr2</ext> 
+    <ext>cr3</ext> 
+    <ext>nef</ext> 
+    <ext>arw</ext>
+    <ext>dng</ext> 
+    <ext>jpeg</ext> 
+    <ext>gif</ext>
+    <ext>tif</ext> 
+    <ext>tiff</ext> 
+    <ext>psd</ext> 
+    <ext>bmp</ext>
+    <ext>heic</ext> 
+    <ext>mp4</ext> 
+    <ext>mov</ext>
+    <ext>avi</ext> 
+    <ext>mkv</ext> 
+    <ext>mts</ext> 
+    <ext>m2t</ext>
+    <ext>m2ts</ext> 
+    <ext>pdf</ext> 
+    <ext>doc</ext>
+    <ext>docx</ext> 
+    <ext>xls</ext> 
+    <ext>xlsx</ext> 
+    <ext>ppt</ext>
+    <ext>pptx</ext> 
+</type> 

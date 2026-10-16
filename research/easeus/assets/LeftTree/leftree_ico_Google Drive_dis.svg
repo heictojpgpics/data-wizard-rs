@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="18px" height="18px" viewBox="0 0 18 18" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>leftree_ico_Google Drive_dis</title>
+    <defs>
+        <linearGradient x1="0%" y1="11.5234276%" x2="100%" y2="88.4765724%" id="linearGradient-1">
+            <stop stop-color="#FFEE81" offset="0%"></stop>
+            <stop stop-color="#FFDD80" offset="100%"></stop>
+        </linearGradient>
+        <linearGradient x1="0%" y1="56.6314647%" x2="100%" y2="43.3685353%" id="linearGradient-2">
+            <stop stop-color="#A5DBFF" offset="0%"></stop>
+            <stop stop-color="#93C2FE" offset="100%"></stop>
+        </linearGradient>
+        <linearGradient x1="55.0071015%" y1="0%" x2="44.6652528%" y2="100%" id="linearGradient-3">
+            <stop stop-color="#80E9BD" offset="0%"></stop>
+            <stop stop-color="#80D6A4" offset="100%"></stop>
+        </linearGradient>
+    </defs>
+    <g id="leftree_ico_Google-Drive_dis" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="编组" transform="translate(0.382927, 1.000000)" fill-rule="nonzero">
+            <polygon id="路径" fill="url(#linearGradient-1)" points="16.7840862 9.55980897 11.2954381 0 5.88635658 0 11.3750046 9.55980897"></polygon>
+            <polygon id="路径" fill="url(#linearGradient-2)" points="6.76135358 10.3564592 4.05681282 15.1363636 14.4772439 15.1363636 17.1818182 10.3564592 6.76135358 10.3564592"></polygon>
+            <polygon id="路径" fill="url(#linearGradient-3)" points="0 10.3564592 2.70454076 15.1363636 7.95452277 5.97488565 5.17043225 1.19498116"></polygon>
+        </g>
+    </g>
+</svg>

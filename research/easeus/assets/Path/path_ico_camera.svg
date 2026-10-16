@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24px" height="24px" viewBox="0 0 24 24" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+    <title>path_ico_camera</title>
+    <g id="path_ico_camera" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="编组" transform="translate(1.000000, 2.000000)">
+            <path d="M7,2 L20,2 C21.1045695,2 22,2.8954305 22,4 L22,17 C22,18.1045695 21.1045695,19 20,19 L7,19 L7,19 L7,2 Z" id="矩形" fill="#AAB3C7"></path>
+            <path d="M2,2 L7,2 L7,2 L7,19 L2,19 C0.8954305,19 0,18.1045695 0,17 L0,4 C0,2.8954305 0.8954305,2 2,2 Z" id="矩形" fill="#C0C9DA"></path>
+            <g id="圆镜头" transform="translate(8.000000, 5.000000)">
+                <path d="M5.5,0 C8.53756612,0 11,2.46243388 11,5.5 C11,8.53756612 8.53756612,11 5.5,11 C2.46243388,11 0,8.53756612 0,5.5 C0,2.46243388 2.46243388,0 5.5,0 Z" id="路径" fill="#ECEDF1"></path>
+                <path d="M5.5,0.5 C8.26142375,0.5 10.5,2.73857625 10.5,5.5 C10.5,8.26142375 8.26142375,10.5 5.5,10.5 C2.73857625,10.5 0.5,8.26142375 0.5,5.5 C0.5,2.73857625 2.73857625,0.5 5.5,0.5 Z" id="路径" fill="#3D6BB1" fill-rule="nonzero"></path>
+                <circle id="椭圆形" fill="#0E3C83" cx="5.5" cy="5.5" r="4"></circle>
+                <circle id="椭圆形" fill="#092555" cx="5.5" cy="5.5" r="2.5"></circle>
+                <ellipse id="椭圆形" fill="#ECEDF1" cx="5.5" cy="2" rx="1.5" ry="1"></ellipse>
+                <circle id="椭圆形" fill="#031555" cx="5.5" cy="5.5" r="1.5"></circle>
+            </g>
+            <path d="M5,0 L8,0 C8.55228475,0 9,0.44771525 9,1 L9,2 L9,2 L4,2 L4,1 C4,0.44771525 4.44771525,1.11022302e-16 5,0 Z" id="矩形" fill="#6D7486"></path>
+            <polygon id="矩形" fill="#8A92A3" points="6 2 7 2 7 19 6 19"></polygon>
+        </g>
+    </g>
+</svg>

@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+    <type Description="Picture">
+        <ext alias="00jpg">jpg</ext>
+        <ext alias="01png">png</ext>
+        <ext alias="02jpeg">jpeg</ext>
+        <ext alias="03gif">gif</ext>
+        <ext alias="04tif">tif</ext>
+        <ext alias="05eps">eps</ext>
+        <ext alias="06psd">psd</ext>
+        <ext alias="07bmp">bmp</ext>
+        <ext alias="08ico">ico</ext>
+    </type>
+    <type Description="Video">
+        <ext alias="00mp4">mp4</ext>
+        <ext alias="01mov">mov</ext>
+        <ext alias="02avi">avi</ext>
+        <ext alias="03swf">swf</ext>
+        <ext alias="04m4v">m4v</ext>
+        <ext alias="05fla">fla</ext>
+        <ext alias="06wmv">wmv</ext>
+    </type>
+    <type Description="Document">
+        <ext alias="00doc">doc</ext>
+        <ext alias="01docx">docx</ext>
+        <ext alias="02pdf">pdf</ext>
+        <ext alias="03xls">xls</ext>
+        <ext alias="04xlsx">xlsx</ext>
+        <ext alias="05ppt">ppt</ext>
+        <ext alias="06pptx">pptx</ext>
+    </type>
+    <type Description="Audio">
+        <ext alias="00mp3">mp3</ext>
+        <ext alias="01wav">wav</ext>
+        <ext alias="02wma">wma</ext>
+        <ext alias="03m4a">m4a</ext>
+        <ext alias="04ape">ape</ext>
+        <ext alias="05flac">flac</ext>
+        <ext alias="06aac">aac</ext>
+    </type>
+    <type Description="Archive">
+        <ext alias="00zip">zip</ext>
+        <ext alias="01rar">rar</ext>
+        <ext alias="027z">7z</ext>
+        <ext alias="03tar">tar</ext>
+        <ext alias="04gzip">gzip</ext>
+    </type>
+</root>   
