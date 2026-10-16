@@ -38,11 +38,28 @@ interface Step {
 const DWELL_MS = 2600;
 
 /** The harness sync signal: stamps `Data Wizard · tNN-name` into the
- * window title (the one channel both platforms expose without a
- * debugger protocol). */
+ * window title. document.title does NOT propagate to the native
+ * window title on WebView2 — drive the real window via the Tauri API
+ * too (the plain-browser mock keeps the document.title path; the
+ * dynamic import resolves only inside the webview). */
 function tourTitle(i: number, name: string) {
   const slug = name.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
-  document.title = `Data Wizard · t${String(i).padStart(2, "0")}-${slug}`;
+  const title = `Data Wizard · t${String(i).padStart(2, "0")}-${slug}`;
+  document.title = title;
+  import("@tauri-apps/api/window")
+    .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title))
+    .catch(() => {
+      // Plain browser (mock) — document.title is the channel.
+    });
+}
+
+/** The tour-done marker uses the same dual channel. */
+function tourTitleEnd() {
+  const title = "Data Wizard · tour-done";
+  document.title = title;
+  import("@tauri-apps/api/window")
+    .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title))
+    .catch(() => undefined);
 }
 
 export function TourDriver() {
@@ -187,7 +204,7 @@ export function TourDriver() {
       const runStep = async () => {
         if (disposed) return;
         if (i >= steps.length) {
-          document.title = "Data Wizard · tour-done";
+          tourTitleEnd();
           return;
         }
         const step = steps[i];
