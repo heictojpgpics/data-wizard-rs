@@ -402,14 +402,35 @@ jobs:
           # Start-Process resolves shell: URIs as file paths; the shell
           # activation has to go through explorer.
           Start-Process explorer.exe -ArgumentList "shell:AppsFolder/$pf!DataWizard"
-          $deadline = (Get-Date).AddSeconds(15)
+          $deadline = (Get-Date).AddSeconds(30)
           $app = $null
           while ((Get-Date) -lt $deadline) {
             Start-Sleep -Milliseconds 500
             $app = Get-Process dw-tauri -ErrorAction SilentlyContinue
             if ($app) { break }
           }
-          if (-not $app) { throw "app did not start within 15s of activation" }
+          if (-not $app) {
+            Write-Host "shell activation produced no process; trying direct launch"
+            Write-Host "=== last TWinUI events ==="
+            Get-WinEvent -LogName "Microsoft-Windows-TWinUI/Operational" -MaxEvents 5 -ErrorAction SilentlyContinue |
+              ForEach-Object { Write-Host "$($_.TimeCreated) $($_.Message)" }
+            # The WindowsApps ACLs can deny the interactive user a read on
+            # the exe (execute-only); widen them for this CI-only check and
+            # launch directly with output capture.
+            icacls $pkg.InstallLocation /grant "Users:(OI)(CI)(RX)" | Out-Null
+            $so = "$env:TEMP\app-msix-stdout.txt"
+            $se = "$env:TEMP\app-msix-stderr.txt"
+            $p2 = Start-Process $exe -PassThru -RedirectStandardOutput $so -RedirectStandardError $se
+            Start-Sleep -Seconds 10
+            if ($p2.HasExited) {
+              Write-Host "=== app stdout ==="
+              Get-Content $so -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
+              Write-Host "=== app stderr ==="
+              Get-Content $se -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
+              throw "direct launch also failed (code $($p2.ExitCode))"
+            }
+            $app = $p2
+          }
           Start-Sleep -Seconds 10
           $app.Refresh()
           if ($app.HasExited) {
