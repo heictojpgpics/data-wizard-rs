@@ -27,16 +27,20 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $vhd = "$env:TEMP\test_refs.vhd"
           $vhdScript = @"
-          create vdisk file="$vhd" maximum=512 type=expandable
+          create vdisk file="$vhd" maximum=2048 type=expandable
           select vdisk file="$vhd"
           attach vdisk
           create partition primary
-          format fs=refs label="TestReFS" quick
           assign letter=R
           exit
           "@
-          $vhdScript | diskpart
+          $vhdScript | diskpart | Out-Null
 
+          # ReFS rejects small volumes ("volume size is too small" below
+          # ~1 GiB), hence the 2 GiB VHD; format via the storage cmdlets.
+          $part = Get-Partition -DriveLetter R
+          $label = Format-Volume -Partition $part -FileSystem ReFS -NewFileSystemLabel "TestReFS" -Confirm:$false -Force
+          $label | Format-List | Out-String | Write-Host
           fsutil fsinfo volumeinfo R:
 
       - name: Populate the volume
