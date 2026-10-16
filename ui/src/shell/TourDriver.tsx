@@ -106,8 +106,13 @@ export function TourDriver() {
             detail: hooks.scan ? "CI staged source" : "Synthetic source",
             partition: null,
           });
-        } catch {
-          /* the no-scan tour continues */
+        } catch (e) {
+          // Surface the failure — the tour screenshots must show WHY a
+          // scan did not start instead of silently touring an empty app.
+          useAppStore.getState().setToast({
+            text: `Tour scan failed to start: ${String(e)}`,
+            kind: "err",
+          });
         }
       };
 

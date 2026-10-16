@@ -984,3 +984,40 @@ Work Log:
 Stage Summary:
 - The branch is synced with origin/draft (65d2062) + this session's
   work; ready to commit and push.
+
+---
+Task ID: 4 (session 8, follow-up)
+Agent: main (Super Z)
+Task: CI verification loop — fix the three workflow failures found by the runners
+
+Work Log:
+- Run fe49ca0: CI + Security Scan green; Build and Test / MSIX Build /
+  UI Screenshots all failed at the tauri step with npm ENOENT on
+  ui/package.json. ROOT CAUSE (reproduced locally): with the new root
+  package.json, the relative "--prefix ../ui" inside beforeBuildCommand
+  resolves differently under 'npx tauri' than under 'cargo tauri'.
+  FIX: DiskGenie's pattern — tauri.conf.json speaks plain
+  'npm run build'/'npm run dev'; the ROOT package.json carries
+  'build: npm --prefix ui run build'. npm's upward package.json
+  discovery makes it cwd-independent. Run 1b95efa: all five workflows
+  green (NSIS smoke + MSIX integrity + Store MSIX + screenshots).
+- The screenshots run captured 49 frames via the cadence FALLBACK
+  (title markers never matched): document.title does not propagate to
+  the native window title on WebView2 (DiskGenie's own round-18
+  artifacts show the same fallback). FIX: the TourDriver now also
+  drives getCurrentWindow().setTitle() for every step stamp.
+- The cadence frames showed an EMPTY results view: the tour's scan of
+  \\.\T: had failed silently (volume device opens fail in the runner
+  context — list_disks sizes also read 0 B there; every green
+  verification run scans the VHD FILE instead). FIX: stage the VHD,
+  DETACH it, point DATAWIZARD_SCAN at the file path; the tour's scan
+  failures now surface as an on-screen toast so screenshots show the
+  why.
+- VLM verification of the REAL app frames from the runner: source view
+  renders completely (3 drives, badges, sidebar, image card, saved
+  scans), results view fully styled — the release-build CSS problem is
+  definitively fixed in production builds.
+
+Stage Summary:
+- All five workflows green at 1b95efa; tour title-sync + VHD file scan
+  fix queued for the next run.
