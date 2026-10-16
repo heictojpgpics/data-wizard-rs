@@ -58,6 +58,7 @@ fn all_plugins() -> Vec<Arc<dyn dw_core::FsPlugin>> {
         Arc::new(dw_hfs::HfsPlugin),
         Arc::new(dw_btrfs::BtrfsPlugin),
         Arc::new(dw_zfs::ZfsPlugin),
+        Arc::new(dw_refs::RefsPlugin),
     ]
 }
 

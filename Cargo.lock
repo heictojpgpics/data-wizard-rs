@@ -616,6 +616,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "dw-refs"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dw-carver",
+ "dw-core",
+ "dw-disk",
+ "dw-signatures",
+ "serde",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "dw-scantool"
 version = "0.1.0"
 dependencies = [
@@ -629,6 +647,7 @@ dependencies = [
  "dw-fat",
  "dw-hfs",
  "dw-ntfs",
+ "dw-refs",
  "dw-signatures",
  "dw-zfs",
  "tempfile",
