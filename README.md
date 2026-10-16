@@ -21,16 +21,17 @@ See [`worklog.md`](./worklog.md) for the running work log and [`docs/`](./docs/)
 | ext2/3/4 | live walk + shadow-dirent deleted names (extent trees and indirect maps, fragmented files in content order) | orphan-inode pass + free-block carve | **Working, tested** |
 | Btrfs | live subvolume walks (checksummed nodes, non-identity chunk mapping, fragmented order, inline files) | orphan-tree-block pass (old COW generations surface with names and extents) | **Working, tested** |
 | ZFS (OpenZFS on-disk) | live tree walk from the newest uberblock: labels fletcher4-verified, MOS -> root dataset -> FS tree, SA or legacy-znode timestamps, physical extents, symlink resident data; LZJB/GZIP/ZLE/LZ4/ZSTD reads under fletcher2/fletcher4/SHA-256 verification | previous-uberblock pass (second-newest txg: recently deleted entries keep names, timestamps, extents) | **Working, tested** |
-| Unknown/blank | - | raw carve fallback (258 signatures, tiered validation) | **Working, tested** |
+| ReFS | MSB+ page records: live files by name/size/timestamps (quick); headless old-generation pages surface deleted records (deep) | signature carving over non-metadata regions (content-backed entries for deleted files) | **Working, tested** |
+| Unknown/blank | - | raw carve fallback (258 signatures, tiered validation) + bifragment gap carving + EOCD-backward ZIP recovery + scattered-chunk PNG map carving | **Working, tested** |
 
-Nothing else is claimed. ReFS is **not implemented yet**: the
-reference product does ship a real engine for it (verified during
-clean-room RE - see `open-recovery-wizard/docs/08-driver-and-module-re.md`),
-and ours is in flight the honest way: a real formatted ReFS sample
-volume is built on CI (`refs-sample.yml`), the layout gets validated
-empirically against it (the approach that produced the HFS+ engine),
-and only then does the matrix row appear. Until then there is no stub
-crate to find: absent means absent.
+Nothing else is claimed. ReFS scope, stated honestly: the engine is
+record-scoped (validated against a real Windows-formatted ReFS 3.14
+volume built on CI, `refs-sample.yml`) - live and deleted files
+surface with exact names, sizes and all four FILETIME timestamps;
+file *content* recovery flows through the deep carving pass, because
+ReFS stores data runs behind container/block-allocation indirection
+(decoding that table is the documented next milestone). Extents-less
+entries carry `PartiallyRecovered` and recovery refuses to guess.
 
 Btrfs scope, stated honestly: single-device, non-RAID volumes with
 crc32c-verified structures; compressed extents surface as metadata

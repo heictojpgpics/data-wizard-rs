@@ -1021,3 +1021,88 @@ Work Log:
 Stage Summary:
 - All five workflows green at 1b95efa; tour title-sync + VHD file scan
   fix queued for the next run.
+Task ID: 1 (session 9)
+Agent: main (Super Z)
+Task: Fix the broken release build (disk space broken + nothing works), complete all remaining implementations (ReFS engine, 3 carver strategies, HFS extents-overflow, NTFS $ATTRIBUTE_LIST), no stubs/TODOs left
+
+Work Log:
+- ROOT CAUSE (user-reported "disk space showing is broken + nothing works"):
+  (a) `WindowsRawSource::query_size` used `GetFileSizeEx` on device
+      handles - device handles do not answer FileStandardInformation,
+      so physical drives were silently dropped (size==0 guard) and
+      volume sizes were garbage; (b) enumeration ran with whatever
+      token the shell gave it - raw opens fail unelevated, so on a
+      normal (non-admin) launch every device open was access-denied;
+  (c) no free/used space or hardware model was reported at all.
+- FIX: new `dw-disk::windows_enum` module - sizes via
+  IOCTL_DISK_GET_LENGTH_INFO, sector size via DISK_GEOMETRY_EX,
+  model/serial/bus/removable via IOCTL_STORAGE_QUERY_PROPERTY,
+  volume label/fs/total/free via GetVolumeInformationW +
+  GetDiskFreeSpaceExW, volume->partition mapping via
+  IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS (query-only handle works
+  even unelevated); `windows_raw::query_size` rewritten on
+  IOCTL_DISK_GET_LENGTH_INFO; DiskInfo/PartitionInfo gained
+  free_bytes/model/serial; list_partitions applies the same volume
+  mapping so both views agree; app embedded manifest now requests
+  requireAdministrator (the category standard - raw disk access
+  needs an elevated token) via tauri-build WindowsAttributes.
+- NEW `--diagnostics` headless channel: prints a JSON report of the
+  storage stack (disks with sizes/models/buses/partitions, volumes,
+  raw-access capability) and exits 0/1/2. The NSIS smoke test now
+  runs it and asserts: >=1 disk, all sizes nonzero, raw access OK -
+  the exact regression that shipped is now build-breaking.
+- ReFS engine COMPLETED (was in-flight): quick pass now parses
+  records only inside headed MSB+ pages (live files), deep pass
+  parses headless old-generation pages for ids never seen live
+  (deleted, was_deleted=true) AND carves content over non-metadata
+  regions via header_footer (same pattern as the ext free-run
+  carve). Fixed record-loop bounds bug + variable record advance.
+  17 tests (11 unit + 6 integration incl. content carve + no-carve-
+  in-quick guards).
+- CARVER: the three strategy stubs are now real implementations:
+  * bifragment.rs - Richard & Roussev gap carving: cluster-aligned
+    (X,Y) split search with geometrically-growing fragment-2 probes;
+    structure-chained formats only (PNG/ZIP/MP4/PE); JPEG excluded
+    by design (entropy data accepts arbitrary continuation ->
+    fabricated files). Byte-exact reassembly test.
+  * structured.rs - ZIP exact-end via LFH chain + central-directory
+    walk + EOCD arithmetic cross-check (stronger than the first-EOCD
+    heuristic; handles SFX stubs); backward carving from EOCD
+    records recovers archives with damaged headers.
+  * fragment.rs - map carving: scattered-chunk PNG reassembly; every
+    chunk is CRC32-verified in isolation (false link 2^-32), chain
+    follows expected positions with cluster-aligned search, extents
+    coalesced into maximal runs.
+  * Analysers strengthened (benefits every carve): PNG chunk CRCs
+    are now verified (structure-only walks accepted wrong-split
+    reassemblies); ZIP EOCD entries/cd_size/cd_offset arithmetic +
+    CD signature verified.
+  * All strategies wired into the app-layer deep fallback after the
+    header_footer pass (blocking pool, shared cancel flag).
+- dw-hfs: extents-overflow B-tree (CNID 3) implemented - record
+  parser, leaf-chain walker, per-fork map assembly, fork completion
+  (live files beyond inline coverage now Intact instead of
+  PartiallyRecovered), orphaned-fragment deep pass (deleted files'
+  indexed extents surface as cnid_N entries). FIXED a real fork
+  mapping bug: fork_offset_to_volume added the accumulated fork-block
+  count to each extent's start block (wrong for non-contiguous
+  extents - second extent mapped to garbage). 19 tests incl. a
+  synthetic end-to-end overflow B-tree walk.
+- dw-ntfs: $ATTRIBUTE_LIST implemented - entry parser (type/vcn/
+  mft-reference split/attribute-id/name), extension-record loader
+  through the MFT run index, base-back-reference verification, VCN-
+  ordered run-list merge. The walker follows the list when the base
+  record's $DATA is missing/partial. 42 tests.
+- scan.rs stale "TODO - not yet implemented" comment replaced with
+  the accurate description (app-layer fallback, layering note).
+- Full suite: 377 tests passing (was 333), fmt + clippy clean
+  (workspace + msvc cross-check with the new manifest embedding).
+
+Stage Summary:
+- The release-blocking storage stack is rebuilt on authoritative
+  IOCTLs + elevation; the smoke test guards it forever.
+- Zero TODO/stub markers remain in non-test Rust code; every module
+  in crates/ is a real, tested implementation.
+- Support matrix: NTFS(+attr-list), FAT12/16/32, exFAT, HFS+(+
+  extents-overflow), ext2/3/4, Btrfs, ZFS, ReFS, raw carving(+
+  bifragment/structured/map strategies) - all "Working, tested".

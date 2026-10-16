@@ -279,7 +279,7 @@ const handlers: Record<string, (args: Req) => Promise<unknown>> = {
         return {
           table_kind: "mbr",
           partitions: [
-            { index: 0, offset_bytes: 4096 * 512, size_bytes: 32 * 1024 * 1024 * 1024, fs_kind: "fat32", label: "SD CARD", drive_letter: null, is_system: false },
+            { index: 0, offset_bytes: 4096 * 512, size_bytes: 32 * 1024 * 1024 * 1024, free_bytes: 11 * 1024 * 1024 * 1024, fs_kind: "fat32", label: "SD CARD", drive_letter: null, is_system: false },
           ],
         } satisfies ListPartitionsResponse;
       }

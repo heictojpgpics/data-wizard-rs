@@ -192,6 +192,37 @@ fn analyse_jpeg(buf: &[u8]) -> AnalyserOutcome {
 
 const PNG_SIG: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
+/// CRC-32 (IEEE 802.3, the PNG chunk polynomial 0xEDB88320),
+/// table-driven. Used to verify chunk CRCs — the property that makes
+/// wrong-split reassemblies fail (a fabricated PNG chain alignment
+/// survives a structure-only walk, never a CRC check).
+fn crc32_ieee(data: &[u8]) -> u32 {
+    fn table() -> &'static [u32; 256] {
+        static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
+        TABLE.get_or_init(|| {
+            let mut t = [0u32; 256];
+            for (i, e) in t.iter_mut().enumerate() {
+                let mut c = i as u32;
+                for _ in 0..8 {
+                    c = if c & 1 != 0 {
+                        0xEDB8_8320 ^ (c >> 1)
+                    } else {
+                        c >> 1
+                    };
+                }
+                *e = c;
+            }
+            t
+        })
+    }
+    let t = table();
+    let mut crc: u32 = 0xFFFF_FFFF;
+    for &b in data {
+        crc = t[((crc ^ b as u32) & 0xFF) as usize] ^ (crc >> 8);
+    }
+    !crc
+}
+
 /// Walk PNG chunks to IEND.
 fn analyse_png(buf: &[u8]) -> AnalyserOutcome {
     if buf.len() < 8 || buf[..8] != PNG_SIG {
@@ -230,6 +261,15 @@ fn analyse_png(buf: &[u8]) -> AnalyserOutcome {
         if next > buf.len() as u64 {
             return AnalyserOutcome::NeedMore;
         }
+        // CRC verification (spec 5.4): the chunk's trailing CRC32 must
+        // match type ++ data. A chain that merely lines up (which wrong
+        // reassembly splits can fabricate) never survives this check.
+        let n = next as usize;
+        let expect = u32::from_be_bytes([buf[n - 4], buf[n - 3], buf[n - 2], buf[n - 1]]);
+        let actual = crc32_ieee(&buf[pos + 4..n - 4]);
+        if expect != actual {
+            return AnalyserOutcome::Invalid;
+        }
         if is_iend {
             return AnalyserOutcome::Validated(next);
         }
@@ -258,6 +298,31 @@ fn analyse_zip(buf: &[u8]) -> AnalyserOutcome {
             let end = i + EOCD_LEN + comment_len;
             if end > buf.len() {
                 return AnalyserOutcome::NeedMore;
+            }
+            // EOCD field cross-checks (APPNOTE 4.3.16): the central
+            // directory the record describes must actually be inside
+            // the buffer it claims, and at least one entry must exist.
+            // Wrong-split reassemblies line the EOCD up by accident;
+            // these invariants do not survive that.
+            let cd_size =
+                u32::from_le_bytes([buf[i + 12], buf[i + 13], buf[i + 14], buf[i + 15]]) as usize;
+            let cd_offset =
+                u32::from_le_bytes([buf[i + 16], buf[i + 17], buf[i + 18], buf[i + 19]]) as usize;
+            let entries = u16::from_le_bytes([buf[i + 10], buf[i + 11]]) as usize;
+            if entries == 0 {
+                return AnalyserOutcome::Invalid;
+            }
+            // With no prepended data, cd_offset + cd_size == i. SFX
+            // stubs shift the archive start, so accept any layout
+            // where the directory window lies inside the buffer and
+            // its first record is a central-directory header.
+            if cd_offset.saturating_add(cd_size) > i {
+                return AnalyserOutcome::Invalid;
+            }
+            if cd_offset + 4 > buf.len()
+                || buf[cd_offset..cd_offset + 4] != [0x50, 0x4B, 0x01, 0x02]
+            {
+                return AnalyserOutcome::Invalid;
             }
             return AnalyserOutcome::Validated(end as u64);
         }
@@ -543,8 +608,21 @@ mod tests {
         v.extend_from_slice(&(data.len() as u32).to_be_bytes());
         v.extend_from_slice(kind);
         v.extend_from_slice(data);
-        v.extend_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]); // CRC (not validated)
+        let mut crc_input = Vec::with_capacity(4 + data.len());
+        crc_input.extend_from_slice(kind);
+        crc_input.extend_from_slice(data);
+        v.extend_from_slice(&crc32_ieee(&crc_input).to_be_bytes());
         v
+    }
+
+    #[test]
+    fn png_corrupt_chunk_crc_is_invalid() {
+        // Structure intact, CRC wrong: must be rejected now that CRCs
+        // are verified.
+        let mut img = minimal_png(64);
+        let n = img.len();
+        img[n - 6] ^= 0xFF; // corrupt the IEND CRC
+        assert_eq!(analyse(AnalyserKind::Png, &img), AnalyserOutcome::Invalid);
     }
 
     fn minimal_png(payload: usize) -> Vec<u8> {
@@ -601,20 +679,54 @@ mod tests {
     // ---- ZIP ----
 
     fn minimal_zip(comment: &[u8]) -> Vec<u8> {
-        // Local file header (30 bytes fixed) + filename + EOCD.
+        // Local file header (30 bytes fixed) + filename, one central
+        // directory record, then the EOCD whose fields describe that
+        // directory exactly.
         let mut v = Vec::new();
         v.extend_from_slice(&[0x50, 0x4B, 0x03, 0x04]); // LFH sig
         v.extend_from_slice(&[0u8; 26]); // rest of fixed LFH
         v.extend_from_slice(b"a.txt"); // filename
-        // EOCD: sig + 16 fixed bytes + disk numbers... layout:
-        // 0..4 sig, 4..6 disk, 6..8 cd disk, 8..10 entries disk,
-        // 10..12 entries total, 12..16 cd size, 16..20 cd offset,
-        // 20..22 comment len
+        // Central directory record for a.txt: 46-byte fixed part with
+        // the name appended (sizes left zero — the analyser checks the
+        // record signature and the EOCD's arithmetic, not per-record
+        // fields).
+        let cd_off = v.len();
+        let mut cd = Vec::new();
+        cd.extend_from_slice(&[0x50, 0x4B, 0x01, 0x02]); // CD sig
+        cd.extend_from_slice(&[0u8; 42]);
+        cd.extend_from_slice(b"a.txt");
+        v.extend_from_slice(&cd);
+        // EOCD: sig, disk(2), cd disk(2), entries this disk(2),
+        // entries total(2), cd size(4), cd offset(4), comment len(2).
         v.extend_from_slice(&EOCD_SIG);
-        v.extend_from_slice(&[0u8; 16]);
+        v.extend_from_slice(&[0u8; 4]);
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&(cd.len() as u32).to_le_bytes());
+        v.extend_from_slice(&(cd_off as u32).to_le_bytes());
         v.extend_from_slice(&(comment.len() as u16).to_le_bytes());
         v.extend_from_slice(comment);
         v
+    }
+
+    #[test]
+    fn zip_zero_entries_is_invalid() {
+        // An EOCD claiming zero entries is not an archive.
+        let mut z = minimal_zip(b"");
+        let eocd = z.windows(4).rposition(|w| w == EOCD_SIG).unwrap();
+        z[eocd + 10..eocd + 12].copy_from_slice(&0u16.to_le_bytes());
+        z[eocd + 8..eocd + 10].copy_from_slice(&0u16.to_le_bytes());
+        assert_eq!(analyse(AnalyserKind::Zip, &z), AnalyserOutcome::Invalid);
+    }
+
+    #[test]
+    fn zip_eocd_describing_foreign_directory_is_invalid() {
+        // EOCD whose cd_offset points at a non-CD signature.
+        let mut z = minimal_zip(b"");
+        let eocd = z.windows(4).rposition(|w| w == EOCD_SIG).unwrap();
+        // Point the directory at the LFH (PK 03 04) instead of the CD.
+        z[eocd + 16..eocd + 20].copy_from_slice(&0u32.to_le_bytes());
+        assert_eq!(analyse(AnalyserKind::Zip, &z), AnalyserOutcome::Invalid);
     }
 
     #[test]

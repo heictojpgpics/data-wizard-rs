@@ -23,8 +23,9 @@ use parking_lot::Mutex;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_BEGIN, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    GetFileSizeEx, OPEN_EXISTING, ReadFile, SetFilePointerEx,
+    OPEN_EXISTING, ReadFile, SetFilePointerEx,
 };
+use windows::Win32::System::IO::DeviceIoControl;
 use windows::core::PCWSTR;
 
 use crate::source::{DiskSource, ReadAt};
@@ -97,13 +98,38 @@ impl Drop for SendHandle {
 }
 
 fn query_size(handle: HANDLE) -> DiskResult<u64> {
-    let mut size: i64 = 0;
-    // SAFETY: GetFileSizeEx takes a valid HANDLE and a pointer to i64.
-    let ok = unsafe { GetFileSizeEx(handle, &mut size) };
-    if ok.is_err() {
-        return Err(DiskError::Windows("GetFileSizeEx failed".into()));
-    }
-    Ok(size as u64)
+    // `GetFileSizeEx` does not work for device handles (physical drives,
+    // raw volumes): the file systems do not answer FileStandardInformation
+    // for them, so it fails or reports garbage — the original "disk space
+    // is broken" bug. The authoritative size for a device handle is
+    // IOCTL_DISK_GET_LENGTH_INFO.
+    const IOCTL_DISK_GET_LENGTH_INFO: u32 = 0x0007_405C;
+    let mut out = [0u8; 8];
+    let mut returned: u32 = 0;
+    // SAFETY: valid HANDLE, an 8-byte out buffer for LARGE_INTEGER.
+    let ok = unsafe {
+        DeviceIoControl(
+            handle,
+            IOCTL_DISK_GET_LENGTH_INFO,
+            None,
+            0,
+            Some(out.as_mut_ptr().cast()),
+            out.len() as u32,
+            Some(&mut returned),
+            None,
+        )
+    };
+    if let Ok(()) = ok
+        && returned >= 8
+            && let Ok(b) = out[..8].try_into() {
+                let len = i64::from_le_bytes(b);
+                if len > 0 {
+                    return Ok(len as u64);
+                }
+            }
+    Err(DiskError::Windows(
+        "IOCTL_DISK_GET_LENGTH_INFO failed for device handle".into(),
+    ))
 }
 
 impl ReadAt for WindowsRawSource {

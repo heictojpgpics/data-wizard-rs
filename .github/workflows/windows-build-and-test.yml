@@ -188,6 +188,27 @@ jobs:
           if (-not $app.HasExited) { throw "app did not stop after Stop-Process" }
           Write-Host "NSIS launch smoke passed"
 
+          # Storage-stack regression guard: the --diagnostics channel
+          # exercises the exact list_disks pipeline (IOCTL sizes, volume
+          # mapping, bus types) and reports raw-access capability. The
+          # release-shipping bug this catches: GetFileSizeEx on device
+          # handles returned zero sizes and silently dropped disks.
+          $diag = "$env:TEMP\dw-diagnostics.json"
+          $diagErr = "$env:TEMP\dw-diagnostics-stderr.txt"
+          $d = Start-Process $exe -ArgumentList "--diagnostics" -Wait -PassThru -RedirectStandardOutput $diag -RedirectStandardError $diagErr
+          if ($d.ExitCode -ne 0) {
+            Write-Host "=== diagnostics stderr ==="
+            Get-Content $diagErr -ErrorAction SilentlyContinue | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }
+            throw "diagnostics exited with $($d.ExitCode) (0 = healthy, 1 = no/zero-size disks, 2 = raw access unavailable)"
+          }
+          $report = Get-Content $diag -Raw | ConvertFrom-Json
+          if (-not $report.disks -or $report.disks.Count -lt 1) { throw "diagnostics: no disks enumerated" }
+          $zeroSize = @($report.disks | Where-Object { $_.size_bytes -le 0 })
+          if ($zeroSize.Count -gt 0) { throw "diagnostics: $($zeroSize.Count) disk(s) with zero size (the original broken-disk-space bug)" }
+          if (-not $report.raw_disk_access) { throw "diagnostics: raw disk access unavailable (elevation manifest not honored?)" }
+          Write-Host "diagnostics: $($report.disks.Count) disks, $($report.volumes) volumes, raw access OK"
+          $report.disks | ForEach-Object { Write-Host ("  {0}  {1} bytes  bus={2} parts={3}" -f $_.id, $_.size_bytes, $_.bus_type, $_.partitions.Count) }
+
           # NSIS uninstall: uninstall.exe /S detaches a copy to TEMP and
           # returns, so poll for the install dir to actually disappear.
           $un = Join-Path $loc "uninstall.exe"
@@ -206,6 +227,8 @@ jobs:
           path: |
             ${{ runner.temp }}/app-nsis-stdout.txt
             ${{ runner.temp }}/app-nsis-stderr.txt
+            ${{ runner.temp }}/dw-diagnostics.json
+            ${{ runner.temp }}/dw-diagnostics-stderr.txt
           retention-days: 14
           if-no-files-found: ignore
 

@@ -16,6 +16,7 @@ export interface PartitionInfo {
   index: number;
   offset_bytes: number;
   size_bytes: number;
+  free_bytes: number | null;
   fs_kind: string | null;
   label: string | null;
   drive_letter: string | null;
@@ -26,6 +27,9 @@ export interface DiskInfo {
   id: string;
   display_name: string;
   size_bytes: number;
+  free_bytes: number | null;
+  model: string | null;
+  serial: string | null;
   is_removable: boolean;
   is_system: boolean;
   bus_type: BusType;

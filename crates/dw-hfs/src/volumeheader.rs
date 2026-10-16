@@ -185,7 +185,11 @@ impl VolumeHeader {
         if block_size == 0 {
             return None;
         }
-        // Which volume block holds this byte?
+        // Which volume block holds this byte? Extents map CONSECUTIVE
+        // fork-block runs to ARBITRARY volume-block runs: fork blocks
+        // [acc, acc+count) -> volume blocks [start, start+count). The
+        // run offset within the extent is (fork_block - acc) — NOT
+        // fork_block itself (extents are rarely physically contiguous).
         let mut remaining = fork_offset;
         let mut acc_blocks: u32 = 0;
         for e in &fork.extents {
@@ -193,7 +197,7 @@ impl VolumeHeader {
             if remaining < span {
                 let within = remaining / block_size;
                 return Some(
-                    u64::from(e.start_block + acc_blocks + within as u32) * block_size
+                    u64::from(e.start_block + within as u32) * block_size
                         + (remaining % block_size),
                 );
             }
@@ -201,6 +205,45 @@ impl VolumeHeader {
             acc_blocks = acc_blocks.saturating_add(e.block_count);
         }
         None // beyond inline extents
+    }
+
+    /// Resolve a fork offset through the inline extents plus overflow
+    /// records from the extents-overflow B-tree (TN1150: the first 8
+    /// extents live in the fork; the rest are (fork_id, fork_index,
+    /// start_block, block_count) records in the overflow file).
+    ///
+    /// `overflow` yields the overflow extents in fork order after the
+    /// inline ones (see [`crate::extents`]).
+    pub fn fork_offset_to_volume_with_overflow(
+        &self,
+        fork: &ForkData,
+        fork_offset: u64,
+        fork_id: u32,
+        overflow: &dyn Fn(u32) -> Vec<ForkExtent>,
+    ) -> Option<u64> {
+        if let Some(off) = self.fork_offset_to_volume(fork, fork_offset) {
+            return Some(off);
+        }
+        // Beyond inline coverage: continue into the overflow records.
+        let block_size = u64::from(self.block_size);
+        let mut remaining = fork_offset
+            - fork
+                .extents
+                .iter()
+                .map(|e| u64::from(e.block_count) * block_size)
+                .sum::<u64>();
+        for e in overflow(fork_id) {
+            let span = u64::from(e.block_count) * block_size;
+            if remaining < span {
+                let within = remaining / block_size;
+                return Some(
+                    u64::from(e.start_block + within as u32) * block_size
+                        + (remaining % block_size),
+                );
+            }
+            remaining -= span;
+        }
+        None
     }
 }
 
@@ -276,5 +319,35 @@ mod tests {
         assert_eq!(vh.fork_offset_to_volume(fork, 8191), Some(11 * 4096 + 4095));
         // beyond inline coverage
         assert_eq!(vh.fork_offset_to_volume(fork, 8192), None);
+    }
+
+    #[test]
+    fn fork_offset_maps_noncontiguous_extents_correctly() {
+        // Two inline extents, physically disjoint: fork blocks 0..2 ->
+        // volume 100..102, fork blocks 2..5 -> volume 200..203.
+        // (Regression guard: an earlier mapping added the accumulated
+        // fork-block count to the second extent's start block.)
+        let mut b = build_vh();
+        // catalog fork @272: logical 5 blocks, extent0 {100,2},
+        // extent1 {200,3}
+        b[272..280].copy_from_slice(&(5 * 4096u64).to_be_bytes());
+        b[280..284].copy_from_slice(&4096u32.to_be_bytes());
+        b[284..288].copy_from_slice(&5u32.to_be_bytes());
+        b[288..292].copy_from_slice(&100u32.to_be_bytes());
+        b[292..296].copy_from_slice(&2u32.to_be_bytes());
+        b[296..300].copy_from_slice(&200u32.to_be_bytes());
+        b[300..304].copy_from_slice(&3u32.to_be_bytes());
+        let vh = VolumeHeader::parse(&b).unwrap();
+        let fork = &vh.catalog_file;
+        // Fork block 0 -> volume block 100.
+        assert_eq!(vh.fork_offset_to_volume(fork, 0), Some(100 * 4096));
+        // Fork block 1 (last of extent 0) -> volume 101.
+        assert_eq!(vh.fork_offset_to_volume(fork, 4096), Some(101 * 4096));
+        // Fork block 2 (first of extent 1) -> volume 200, NOT 202.
+        assert_eq!(vh.fork_offset_to_volume(fork, 2 * 4096), Some(200 * 4096));
+        // Fork block 4 (last of extent 1) -> volume 202.
+        assert_eq!(vh.fork_offset_to_volume(fork, 4 * 4096), Some(202 * 4096));
+        // Beyond both extents.
+        assert_eq!(vh.fork_offset_to_volume(fork, 5 * 4096), None);
     }
 }

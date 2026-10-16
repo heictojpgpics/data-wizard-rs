@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod diagnostics;
 mod progress_sink;
 mod state;
 
@@ -14,6 +15,14 @@ use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use crate::state::AppState;
 
 fn main() {
+    // Headless self-check channel: `dw-tauri.exe --diagnostics` prints
+    // a JSON report of the storage stack (drives, sizes, volumes, raw
+    // access) and exits — used by the CI installer smoke test and for
+    // user support. No window, no Tauri runtime.
+    if std::env::args().any(|a| a.eq_ignore_ascii_case("--diagnostics")) {
+        std::process::exit(diagnostics::run());
+    }
+
     // Initialize tracing
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,dw_core=debug,dw_tauri=debug"));
