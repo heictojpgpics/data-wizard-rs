@@ -1136,3 +1136,55 @@ Stage Summary:
   the topbar drags the window, themes sync the native chrome, and the
   tour's title stamps reach MainWindowTitle for the one-frame-per-step
   capture.
+
+---
+Task ID: 2 (session 9)
+Agent: main (Super Z)
+Task: Diagnose + fix the silent app death (0xC0000139); VHD container support (the tour's empty-results root cause)
+
+Work Log:
+- The instrumented run delivered the verdict: BOTH the --diagnostics
+  pre-check and the GUI exited with -1073741511 = 0xC0000139
+  STATUS_ENTRYPOINT_NOT_FOUND - a loader-time death, not a runtime
+  crash.
+- Import-table forensics (llvm-readobj --coff-imports on the CI-built
+  exe, diffed against the last working exe): the binary imports
+  TaskDialogIndirect + the window-subclass APIs - comctl32 6.x-ONLY
+  exports. The custom requireAdministrator manifest had REPLACED
+  Tauri's default manifest wholesale, dropping the
+  Microsoft.Windows.Common-Controls v6 SXS dependency -> the loader
+  bound comctl32 5.82 -> entry point not found -> every launch died
+  before main() with zero stderr output.
+- FIX: the manifest now carries the Common-Controls dependency (with
+  a comment explaining exactly why it can never be dropped) + the
+  elevation + compatibility + UTF-8 sections. Verified by a fully
+  green run: diagnostics exit 0, 14 title-synced tour frames.
+- SECOND root cause (the empty results view): the tour scans the
+  staged VHD FILE (commit 934660dc switched away from \\.\T: volume
+  opens), but a dynamic VHD is a CONTAINER - footer + dynamic header +
+  BAT + blocks - so all 8 plugins correctly rejected it. The file
+  picker even accepted .vhd while nothing could parse it: a real
+  product gap (the reference product supports VHD/VHDX).
+- NEW dw-disk::vhd module (Microsoft VHD spec v1.0, clean-room):
+  fixed + dynamic disks - footer parsing (cookie/size/type), checksum
+  VERIFICATION helper (tolerant: torn footers still parse), dynamic
+  header + BAT, sector-bitmap-skipping block mapping, sparse holes
+  read as zeros, cross-platform positioned reads (pread / seek_read),
+  differencing chains refused with a typed error. VhdSource implements
+  DiskSource + ReadAt with a shareable handle; open_source sniffs the
+  footer cookie and unwraps. 5 new tests (fixed roundtrip, dynamic
+  roundtrip with sparse hole + spanning read, checksum validation,
+  differencing refusal, non-VHD sniff).
+- File picker is honest now: .img/.dd/.raw/.vhd/.bin only (VHDX/VMDK/
+  E01 removed until they are real).
+- Merged the draft branch (window-verb capabilities + drag region fix
+  from the parallel session - the tour title stamps and caption
+  buttons now actually work).
+
+Stage Summary:
+- The app launches again (loader death fixed, root-caused to the
+  missing SXS dependency, documented in the manifest itself).
+- VHD containers open natively - the tour's auto-scan now reaches the
+  NTFS engine through the block map, and users can hand us Hyper-V
+  exports directly.
+- 382 workspace tests green, fmt + clippy (Linux + msvc cross) clean.

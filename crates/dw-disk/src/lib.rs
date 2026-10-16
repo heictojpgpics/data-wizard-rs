@@ -14,6 +14,7 @@ pub mod error;
 pub mod geometry;
 pub mod partition;
 pub mod source;
+pub mod vhd;
 #[cfg(windows)]
 pub mod windows_enum;
 #[cfg(windows)]

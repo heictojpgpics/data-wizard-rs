@@ -24,6 +24,11 @@ See [`worklog.md`](./worklog.md) for the running work log and [`docs/`](./docs/)
 | ReFS | MSB+ page records: live files by name/size/timestamps (quick); headless old-generation pages surface deleted records (deep) | signature carving over non-metadata regions (content-backed entries for deleted files) | **Working, tested** |
 | Unknown/blank | - | raw carve fallback (258 signatures, tiered validation) + bifragment gap carving + EOCD-backward ZIP recovery + scattered-chunk PNG map carving | **Working, tested** |
 
+Container images: **VHD (fixed + dynamic)** opens natively - the block
+allocation table is unwrapped so every engine above sees the guest disk
+(differencing chains are refused with a typed error and fall back to
+raw carving; VHDX is the documented next container milestone).
+
 Nothing else is claimed. ReFS scope, stated honestly: the engine is
 record-scoped (validated against a real Windows-formatted ReFS 3.14
 volume built on CI, `refs-sample.yml`) - live and deleted files

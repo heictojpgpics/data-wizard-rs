@@ -85,6 +85,12 @@ fn open_source(path: &Path) -> Result<Arc<dyn DiskSource>, String> {
             return Ok(Arc::new(src));
         }
     }
+    // VHD containers are not raw images: sniff the footer and unwrap
+    // the block map so the engines see the guest disk.
+    if dw_disk::vhd::looks_like_vhd(path) {
+        let src = dw_disk::vhd::open_vhd(path).map_err(|e| format!("open VHD: {e}"))?;
+        return Ok(Arc::new(src));
+    }
     let src = FileBackedSource::open(path).map_err(|e| format!("open source: {e}"))?;
     Ok(Arc::new(src))
 }

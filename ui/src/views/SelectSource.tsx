@@ -318,7 +318,7 @@ export function SelectSource({ onScan, onResume }: Props) {
           <input
             ref={fileRef}
             type="file"
-            accept=".img,.dd,.raw,.vhd,.vhdx,.vmdk,.e01,.bin"
+            accept=".img,.dd,.raw,.vhd,.bin"
             style={{ display: "none" }}
             onChange={onMockFileChosen}
             aria-label="Disk image file"
