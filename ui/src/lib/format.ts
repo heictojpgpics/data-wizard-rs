@@ -142,6 +142,19 @@ export const CATEGORIES: { id: CategoryId; label: string; varName: string }[] = 
   { id: "other", label: "Other", varName: "--cat-other" },
 ];
 
+/** Stable display order (photos first — the recovery audience's center
+ * of gravity, matching EaseUS's type rail). */
+export const CATEGORY_ORDER_SAFE: CategoryId[] = [
+  "photos",
+  "videos",
+  "audio",
+  "documents",
+  "archives",
+  "email",
+  "code",
+  "other",
+];
+
 /** CSS var for a category's color. */
 export function categoryVar(c: CategoryId): string {
   const entry = CATEGORIES.find((x) => x.id === c);
@@ -179,6 +192,231 @@ export function extensionsOf(c: CategoryId): string[] {
 export function fileKindLabel(ext: string): string {
   const c = categoryOf(ext);
   return CATEGORIES.find((x) => x.id === c)?.label ?? "Other";
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+ * Recoverability — the EaseUS "can I get it back?" verdict column.
+ * Maps our core's status + confidence (0–1000) onto a 4-step human scale.
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export type Recoverability = "excellent" | "good" | "poor" | "lost";
+
+export function recoverabilityOf(status: RecoveryStatusDto, confidence: number): Recoverability {
+  switch (status) {
+    case "Overwritten":
+      return "lost";
+    case "PartiallyRecovered":
+      return "poor";
+    case "Intact":
+      return confidence >= 600 ? "excellent" : "good";
+    case "CarvedValidated":
+      return confidence >= 500 ? "excellent" : "good";
+    case "Carved":
+    case "PendingValidation":
+      return confidence >= 400 ? "good" : "poor";
+  }
+}
+
+export const RECOVERABILITY_META: Record<
+  Recoverability,
+  { label: string; varName: string; hint: string }
+> = {
+  excellent: {
+    label: "Excellent",
+    varName: "--rec-excellent",
+    hint: "Fully recoverable — data blocks are untouched.",
+  },
+  good: {
+    label: "Good",
+    varName: "--rec-good",
+    hint: "Very likely recoverable with no or minor issues.",
+  },
+  poor: {
+    label: "Poor",
+    varName: "--rec-poor",
+    hint: "Recoverable, but the file may be incomplete or damaged.",
+  },
+  lost: {
+    label: "Overwritten",
+    varName: "--rec-lost",
+    hint: "New data has taken this file's place — not recoverable.",
+  },
+};
+
+/* ═════════════════════════════════════════════════════════════════════
+ * Size ranges — filter drawer buckets (EaseUS boundaries, gap-free).
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export interface SizeRange {
+  id: string;
+  label: string;
+  min: number; // inclusive
+  max: number | null; // exclusive; null = unbounded
+}
+
+export const SIZE_RANGES: SizeRange[] = [
+  { id: "under-512k", label: "Under 512 KB", min: 0, max: 512 * 1024 },
+  { id: "512k-1m", label: "512 KB – 1 MB", min: 512 * 1024, max: 1024 ** 2 },
+  { id: "1m-512m", label: "1 MB – 512 MB", min: 1024 ** 2, max: 512 * 1024 ** 2 },
+  { id: "512m-1g", label: "512 MB – 1 GB", min: 512 * 1024 ** 2, max: 1024 ** 3 },
+  { id: "over-1g", label: "Over 1 GB", min: 1024 ** 3, max: null },
+];
+
+/* ═════════════════════════════════════════════════════════════════════
+ * Date ranges — filter drawer buckets (EaseUS set) + group-by buckets.
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export interface DateRange {
+  id: string;
+  label: string;
+  /** Inclusive lower bound as epoch ms (computed at call time). */
+  from: () => number;
+}
+
+const startOfDay = (d: Date) => {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x.getTime();
+};
+
+export const DATE_RANGES: DateRange[] = [
+  { id: "today", label: "Today", from: () => startOfDay(new Date()) },
+  {
+    id: "yesterday",
+    label: "Yesterday",
+    from: () => startOfDay(new Date(Date.now() - 86400_000)),
+  },
+  { id: "last-7d", label: "Last 7 days", from: () => Date.now() - 7 * 86400_000 },
+  { id: "last-30d", label: "Last 30 days", from: () => Date.now() - 30 * 86400_000 },
+  { id: "last-90d", label: "Last 90 days", from: () => Date.now() - 90 * 86400_000 },
+];
+
+/** Group-by-date bucket for a file's mtime. */
+export function dateBucketOf(t: Date | null): { id: string; label: string; rank: number } {
+  if (!t) return { id: "unknown", label: "Unknown date", rank: 99 };
+  const ms = t.getTime();
+  const today = startOfDay(new Date());
+  if (ms >= today) return { id: "today", label: "Today", rank: 0 };
+  if (ms >= today - 86400_000) return { id: "yesterday", label: "Yesterday", rank: 1 };
+  if (ms >= today - 7 * 86400_000) return { id: "week", label: "Last 7 days", rank: 2 };
+  if (ms >= today - 30 * 86400_000) return { id: "month", label: "Last 30 days", rank: 3 };
+  if (ms >= today - 365 * 86400_000) return { id: "year", label: "This year", rank: 4 };
+  return { id: "older", label: "Long ago", rank: 5 };
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+ * Special groups — the EaseUS left-tree semantics, derived from our
+ * core's fields (was_deleted / status / parent_path).
+ * ═════════════════════════════════════════════════════════════════════ */
+
+export type SpecialGroup =
+  | "deleted"
+  | "existing"
+  | "lost" // carved / RAW, name-or-path-lost
+  | "recycled"; // $Recycle.Bin origin
+
+export function isCarvedPath(parentPath: string): boolean {
+  const p = parentPath.toLowerCase();
+  return p === "/carved" || p === "[carved]" || p.startsWith("/carved/");
+}
+
+export function isRecyclePath(parentPath: string): boolean {
+  const p = parentPath.toLowerCase().replace(/\\/g, "/");
+  return p === "/$recycle.bin" || p.startsWith("/$recycle.bin/");
+}
+
+export function specialGroupOf(f: {
+  parent_path: string;
+  status: RecoveryStatusDto;
+  was_deleted: boolean;
+}): SpecialGroup {
+  if (isRecyclePath(f.parent_path)) return "recycled";
+  if (
+    f.status === "Carved" ||
+    f.status === "CarvedValidated" ||
+    f.status === "PendingValidation" ||
+    isCarvedPath(f.parent_path)
+  ) {
+    return "lost";
+  }
+  return f.was_deleted ? "deleted" : "existing";
+}
+
+export const SPECIAL_GROUP_META: Record<
+  SpecialGroup,
+  { label: string; hint: string; varName: string }
+> = {
+  deleted: {
+    label: "Deleted Files",
+    hint: "Files the filesystem marked as deleted — the usual recovery targets.",
+    varName: "--grp-deleted",
+  },
+  existing: {
+    label: "Existing Files",
+    hint: "Files still present on the volume (useful for damaged filesystems).",
+    varName: "--grp-existing",
+  },
+  lost: {
+    label: "Lost Files",
+    hint: "Found by deep scan in unallocated space. The original name or path could not be recovered, but the content is intact.",
+    varName: "--grp-lost",
+  },
+  recycled: {
+    label: "Recycle Bin",
+    hint: "Files that were living in the Recycle Bin when it was emptied.",
+    varName: "--grp-recycled",
+  },
+};
+
+/* ═════════════════════════════════════════════════════════════════════
+ * Junk-file heuristics — the "hide clutter" toggles (EaseUS port).
+ * ═════════════════════════════════════════════════════════════════════ */
+
+const HIDDEN_DIR_PATTERNS = [
+  "$windows.~bt",
+  "$windows.~ws",
+  "config.mst",
+  "system volume information",
+  "windows.old",
+  "appdata\\local\\temp",
+  "appdata/local/temp",
+];
+
+const TEMP_EXTS = new Set(["tmp", "temp", "log", "bak", "part", "crdownload", "partial"]);
+
+export function isJunkFile(f: { name: string; parent_path: string; extension: string; size_bytes: number }): boolean {
+  if (f.size_bytes === 0) return true;
+  const p = f.parent_path.toLowerCase();
+  if (HIDDEN_DIR_PATTERNS.some((pat) => p.includes(pat))) return true;
+  if (TEMP_EXTS.has(f.extension)) return true;
+  if (f.name.toLowerCase() === "desktop.ini" || f.name.startsWith("~$") || f.name.startsWith(".")) {
+    return true;
+  }
+  return false;
+}
+
+export function isSystemPath(parentPath: string): boolean {
+  const p = parentPath.toLowerCase().replace(/\\/g, "/");
+  return (
+    p.startsWith("/windows") ||
+    p.startsWith("/program files") ||
+    p.startsWith("/program files (x86)") ||
+    p.startsWith("/programdata") ||
+    p.startsWith("/users/all users")
+  );
+}
+
+/* ── Sorting comparators (client-side, over the loaded set) ─────────── */
+
+export function compareValues(
+  a: string | number | null | undefined,
+  b: string | number | null | undefined,
+): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
 }
 
 /** Bus type display label. */

@@ -1,459 +1,432 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * Scanning — the centered scan card: header, orb, phase timeline,
- * progress + counters, the live found feed, and terminal panels.
+ * Scanning view — phase timeline, progress cluster with odometer, live
+ * findings feed, category chips, the quick-complete interstitial.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 .dw-scan-page {
-  flex: 1;
+  height: 100%;
   overflow-y: auto;
-  display: flex;
-  justify-content: center;
-  padding: 32px 24px 48px;
-}
-
-.dw-scan-card {
-  width: min(680px, 100%);
-  height: fit-content;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-2);
-  padding: 26px 28px 24px;
+  padding: 44px 48px 28px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 22px;
+  max-width: 980px;
+  margin: 0 auto;
 }
 
-/* ── Header ───────────────────────────────────────────────────────────── */
-.dw-scan-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
+/* ── Hero: glyph + title + odometer ────────────────────────────────────── */
 
-.dw-scan-source {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.dw-scan-source-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: var(--text-tertiary);
-}
-
-.dw-scan-source-name {
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dw-scan-source-detail {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dw-scan-badges {
+.dw-scan-hero {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex: none;
+  gap: 24px;
+  animation: dw-settle-in var(--dur-slow) var(--ease-out);
 }
-
-.dw-mode-badge {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  background: var(--ink-soft);
-  color: var(--ink);
-}
-.dw-mode-badge.dw-deep {
-  background: color-mix(in srgb, var(--st-carved) 14%, transparent);
-  color: var(--st-carved);
-}
-
-.dw-readonly-inline {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  font-weight: 650;
-  color: var(--free);
-}
-
-/* ── Orb zone ─────────────────────────────────────────────────────────── */
-.dw-scan-orb-zone {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 0 2px;
-}
-
-.dw-scan-orb {
+.dw-scan-glyph {
   position: relative;
-  width: 74px;
-  height: 74px;
-  border-radius: 22px;
-  display: grid;
-  place-items: center;
-  background: var(--ink-grad);
-  color: var(--on-ink);
-  box-shadow: var(--ink-glow-strong);
-}
-.dw-scan-orb.dw-done {
-  background: var(--free);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--free) 36%, transparent);
-}
-.dw-scan-orb.dw-failed {
-  background: var(--used);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--used) 36%, transparent);
-}
-
-.dw-scan-orb-ring {
-  position: absolute;
-  inset: -8px;
-  border-radius: 28px;
-  border: 2px solid var(--ink);
-  animation: dw-pulse-ring 1.9s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-.dw-scan-orb-spin {
-  animation: dw-spin 1.6s linear infinite;
-}
-
-.dw-scan-status-line {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 3px;
-  text-align: center;
+  justify-content: center;
+  width: 84px;
+  height: 84px;
+  flex: none;
+  border-radius: 26px;
+  background: var(--ink-soft);
+  color: var(--ink-strong);
 }
-
-.dw-scan-status {
-  font-size: 13px;
-  font-weight: 650;
+.dw-scan-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 30px;
+  border: 2px solid color-mix(in oklab, var(--ink) 40%, transparent);
+  animation: dw-scan-pulse 2.6s var(--ease-in-out) infinite;
 }
-.dw-scan-status.dw-live {
-  color: var(--text);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.dw-scan-ring.dw-r2 {
+  inset: -13px;
+  animation-delay: 0.6s;
+  border-color: color-mix(in oklab, var(--ink) 20%, transparent);
 }
-.dw-scan-status.dw-ok {
-  color: var(--free);
-}
-.dw-scan-status.dw-err {
-  color: var(--used);
-}
-.dw-scan-status.dw-muted {
-  color: var(--text-secondary);
-}
-
-.dw-live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--ink);
-  box-shadow: 0 0 0 0 var(--ink-soft);
-  animation: dw-blink 1.4s ease-in-out infinite;
-}
-@keyframes dw-blink {
+@keyframes dw-scan-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
   50% {
+    transform: scale(1.06);
     opacity: 0.35;
   }
 }
-
-.dw-scan-message {
-  font-size: 12px;
-  color: var(--text-tertiary);
-  max-width: 52ch;
-}
-.dw-scan-message.dw-err {
-  color: var(--used);
+.dw-scan-glyph.dw-paused .dw-scan-ring,
+.dw-scan-glyph.dw-paused .dw-scan-ring.dw-r2 {
+  animation-play-state: paused;
+  opacity: 0.25;
 }
 
-/* ── Phase timeline ───────────────────────────────────────────────────── */
-.dw-timeline {
-  list-style: none;
+.dw-scan-title-block {
   display: flex;
-  align-items: center;
-  padding: 0;
-  margin: 0;
-}
-
-.dw-tl-step {
-  display: flex;
-  align-items: center;
+  flex-direction: column;
+  gap: 7px;
   flex: 1;
   min-width: 0;
 }
+.dw-scan-title-block h1 {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.012em;
+  color: var(--text);
+}
+.dw-scan-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 19px;
+  font-weight: 650;
+  color: var(--ink-strong);
+}
+.dw-scan-count-label {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-tertiary);
+}
+.dw-scan-odo {
+  font-size: 22px;
+  font-weight: 700;
+}
+.dw-scan-sub {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
 
-.dw-tl-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  border: 2px solid var(--border);
-  background: var(--card);
-  flex: none;
-  transition: background var(--dur-base) var(--ease-out),
+/* ── Phase timeline ────────────────────────────────────────────────────── */
+
+.dw-phase-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+.dw-phase-step {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 550;
+}
+.dw-phase-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--track);
+  border: 2px solid var(--control-border);
+  transition:
+    background var(--dur-base) var(--ease-out),
     border-color var(--dur-base) var(--ease-out),
     box-shadow var(--dur-base) var(--ease-out);
 }
-
-.dw-tl-label {
-  margin-left: 7px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-}
-
-.dw-tl-bar {
-  flex: 1;
+.dw-phase-conn {
+  width: 42px;
   height: 2px;
-  margin: 0 10px;
-  border-radius: 1px;
+  border-radius: 2px;
   background: var(--track);
-  min-width: 12px;
+  margin: 0 6px;
+  transition: background var(--dur-base) var(--ease-out);
 }
-
-.dw-tl-step.dw-done .dw-tl-dot {
+.dw-phase-step.dw-done .dw-phase-dot {
   background: var(--ink);
   border-color: var(--ink);
 }
-.dw-tl-step.dw-done .dw-tl-label {
-  color: var(--text-secondary);
+.dw-phase-step.dw-done .dw-phase-conn {
+  background: color-mix(in oklab, var(--ink) 45%, var(--track));
 }
-.dw-tl-step.dw-done .dw-tl-bar {
-  background: color-mix(in srgb, var(--ink) 45%, var(--track));
-}
-
-.dw-tl-step.dw-active .dw-tl-dot {
-  background: var(--ink-grad);
-  border-color: transparent;
+.dw-phase-step.dw-current .dw-phase-dot {
+  background: var(--ink);
+  border-color: var(--ink);
   box-shadow: 0 0 0 4px var(--ink-soft);
 }
-.dw-tl-step.dw-active .dw-tl-label {
-  color: var(--ink);
+.dw-phase-step.dw-current {
+  color: var(--ink-strong);
 }
 
-.dw-timeline.dw-muted .dw-tl-step.dw-active .dw-tl-dot {
-  background: var(--text-tertiary);
-  box-shadow: none;
-}
+/* ── Progress card ─────────────────────────────────────────────────────── */
 
-/* ── Progress + counters ──────────────────────────────────────────────── */
-.dw-track.dw-lg {
-  height: 8px;
-}
-
-.dw-scan-progress {
+.dw-scan-progress-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--card);
+  box-shadow: var(--shadow-1);
+  padding: 18px 20px 16px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 13px;
 }
-
-.dw-scan-progress-meta {
+.dw-track.dw-lg {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+  position: relative;
+}
+.dw-track.dw-lg.dw-paused .dw-track-fill {
+  animation-play-state: paused;
+  opacity: 0.6;
+}
+.dw-scan-metrics {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  font-variant-numeric: tabular-nums;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.dw-scan-metrics span {
+  white-space: nowrap;
 }
 
-.dw-scan-progress-pct {
-  font-size: 22px;
-  font-weight: 750;
-  letter-spacing: -0.02em;
-  color: var(--text);
-  font-family: var(--font-mono);
+/* Category chips */
+.dw-cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.dw-cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--divider);
+  background: var(--chip);
+  color: var(--text-tertiary);
+  font-size: 12px;
+  transition:
+    border-color var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out),
+    background var(--dur-micro) var(--ease-out);
+}
+.dw-cat-chip.dw-live {
+  background: color-mix(in oklab, var(--cat, var(--ink)) 10%, var(--chip));
+  border-color: color-mix(in oklab, var(--cat, var(--ink)) 30%, var(--divider));
+  color: var(--text-secondary);
+}
+.dw-cat-chip[data-cat="photos"] { --cat: var(--cat-photos); }
+.dw-cat-chip[data-cat="videos"] { --cat: var(--cat-videos); }
+.dw-cat-chip[data-cat="audio"] { --cat: var(--cat-audio); }
+.dw-cat-chip[data-cat="documents"] { --cat: var(--cat-documents); }
+.dw-cat-chip[data-cat="archives"] { --cat: var(--cat-archives); }
+.dw-cat-chip[data-cat="email"] { --cat: var(--cat-email); }
+.dw-cat-chip[data-cat="code"] { --cat: var(--cat-code); }
+.dw-cat-chip[data-cat="other"] { --cat: var(--cat-other); }
+.dw-cat-chip-count {
+  font-weight: 700;
 }
 
-.dw-scan-progress-rate,
-.dw-scan-progress-elapsed {
+/* ── Live feed ─────────────────────────────────────────────────────────── */
+
+.dw-scan-feed {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l);
+  background: var(--card);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  flex: 1;
+}
+.dw-scan-feed-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--divider);
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+.dw-scan-feed-note {
+  margin-left: 8px;
+  font-weight: 450;
   font-size: 12px;
   color: var(--text-tertiary);
 }
-
-.dw-scan-counters {
-  display: flex;
-  align-items: stretch;
-  gap: 10px;
-}
-
-.dw-scan-counter {
+.dw-scan-feed-list {
   flex: 1;
-  border-radius: var(--radius-m);
-  border: 1px solid var(--divider);
-  background: var(--panel);
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.dw-scan-counter.dw-quiet {
-  flex: 1.6;
-  justify-content: center;
-}
-
-.dw-scan-counter-num {
-  font-size: 20px;
-  font-weight: 750;
-  letter-spacing: -0.01em;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.dw-scan-counter.dw-quiet .dw-scan-counter-num {
-  color: var(--ink);
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.dw-scan-counter-label {
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-}
-
-/* ── Live feed ────────────────────────────────────────────────────────── */
-.dw-scan-feed {
-  border: 1px solid var(--divider);
-  border-radius: var(--radius-m);
-  background: var(--panel);
-  padding: 6px 10px;
-  min-height: 132px;
-  max-height: 208px;
-  overflow: hidden;
+  overflow-y: auto;
+  padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  max-height: 320px;
 }
-
-.dw-scan-feed-empty {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 8px 6px;
-}
-.dw-feed-skel {
-  height: 18px;
-}
-
-.dw-feed-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  height: 26px;
-  padding: 0 4px;
-  animation: dw-row-in var(--dur-base) var(--ease-out);
-  font-size: 12px;
-}
-
-.dw-feed-glyph {
-  display: grid;
-  place-items: center;
-  flex: none;
-}
-
-.dw-feed-name {
-  color: var(--text);
-  font-weight: 550;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: none;
-  max-width: 38%;
-}
-
-.dw-feed-path {
-  flex: 1;
-  color: var(--text-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-}
-
-.dw-feed-size {
-  color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
-  flex: none;
-}
-
-/* ── Actions ──────────────────────────────────────────────────────────── */
-.dw-scan-actions {
+.dw-scan-feed-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius-s);
+  animation: dw-row-in var(--dur-base) var(--ease-out);
 }
-
-.dw-scan-cancel-note {
-  font-size: 11.5px;
+.dw-scan-feed-row:hover {
+  background: var(--control-hover);
+}
+.dw-scan-feed-name {
+  flex: none;
+  width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+}
+.dw-scan-feed-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.dw-scan-feed-size {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.dw-scan-feed-empty {
+  padding: 34px 20px;
+  text-align: center;
+  font-size: 13px;
   color: var(--text-tertiary);
 }
 
-/* ── Terminal summary panels ──────────────────────────────────────────── */
-.dw-scan-summary {
+/* ── Controls + tip carousel ───────────────────────────────────────────── */
+
+.dw-scan-controls {
   display: flex;
   align-items: center;
   gap: 14px;
-  border-radius: var(--radius-m);
-  border: 1px solid color-mix(in srgb, var(--free) 30%, transparent);
-  background: var(--free-soft);
-  padding: 14px 16px;
+  flex-wrap: wrap;
 }
-
-.dw-scan-summary.dw-muted-panel {
-  border-color: color-mix(in srgb, var(--st-partial) 34%, transparent);
-  background: color-mix(in srgb, var(--st-partial) 9%, transparent);
+.dw-scan-controls-left,
+.dw-scan-controls-right {
+  display: flex;
+  gap: 8px;
 }
-
-.dw-scan-summary-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-m);
-  display: grid;
-  place-items: center;
-  background: var(--free);
-  color: #fff;
-  flex: none;
+.dw-scan-controls-right {
+  margin-left: auto;
 }
-.dw-scan-summary-icon.dw-warn {
-  background: var(--st-partial);
-}
-
-.dw-scan-summary-body {
+.dw-tip-carousel {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   flex: 1;
-  min-width: 0;
+  min-width: 260px;
+  max-width: 520px;
 }
-.dw-scan-summary-body h3 {
-  font-size: 14.5px;
+.dw-tip-bulb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--rec-poor-soft);
+  color: var(--rec-poor);
+}
+.dw-tip-text {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* ── Quick-complete interstitial ───────────────────────────────────────── */
+
+.dw-quickdone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+  padding: 56px 24px;
+  border: 1px solid color-mix(in oklab, var(--rec-excellent) 36%, var(--border));
+  border-radius: var(--radius-l);
+  background: var(--card);
+  box-shadow: var(--shadow-2);
+}
+.dw-quickdone-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  height: 68px;
+  border-radius: 999px;
+  background: var(--rec-excellent-soft);
+  color: var(--rec-excellent);
+}
+.dw-quickdone h1 {
+  margin: 0;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text);
 }
-.dw-scan-summary-body p {
-  font-size: 12.5px;
+.dw-quickdone p {
+  margin: 0;
+  max-width: 560px;
+  font-size: 13.5px;
+  line-height: 1.65;
   color: var(--text-secondary);
-  margin-top: 2px;
-  line-height: 1.45;
+}
+.dw-quickdone-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.dw-quickdone-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  background: var(--chip);
+  border: 1px solid var(--divider);
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+.dw-quickdone-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
+.dw-quickdone-note {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 860px) {
+  .dw-scan-page {
+    padding: 24px 20px;
+  }
+  .dw-scan-hero {
+    flex-direction: column;
+    text-align: center;
+  }
+  .dw-scan-title-block {
+    align-items: center;
+  }
+  .dw-scan-feed-name {
+    width: 160px;
+  }
 }

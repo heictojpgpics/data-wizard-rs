@@ -552,3 +552,161 @@ export function CategoryGlyph({
       return <FileIcon size={size} {...rest} />;
   }
 }
+
+/* ── Revamp additions — scan controls, results toolbar, quick targets ─── */
+
+export const PauseIcon = make(
+  <>
+    <rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none" />
+    <rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor" stroke="none" />
+  </>,
+  "PauseIcon",
+);
+
+export const StopIcon = make(
+  <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" stroke="none" />,
+  "StopIcon",
+);
+
+export const FilterIcon = make(
+  <>
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+  </>,
+  "FilterIcon",
+);
+
+export const ListIcon = make(
+  <>
+    <line x1="8" y1="6" x2="21" y2="6" />
+    <line x1="8" y1="12" x2="21" y2="12" />
+    <line x1="8" y1="18" x2="21" y2="18" />
+    <line x1="3" y1="6" x2="3.01" y2="6" />
+    <line x1="3" y1="12" x2="3.01" y2="12" />
+    <line x1="3" y1="18" x2="3.01" y2="18" />
+  </>,
+  "ListIcon",
+);
+
+export const GridViewIcon = make(
+  <>
+    <rect x="3" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="3" width="7" height="7" rx="1" />
+    <rect x="14" y="14" width="7" height="7" rx="1" />
+    <rect x="3" y="14" width="7" height="7" rx="1" />
+  </>,
+  "GridViewIcon",
+);
+
+export const SortIcon = make(
+  <>
+    <line x1="12" y1="3" x2="12" y2="21" />
+    <path d="m8 7 4-4 4 4" />
+    <path d="m16 17-4 4-4-4" />
+  </>,
+  "SortIcon",
+);
+
+export const MoreIcon = make(
+  <>
+    <circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none" />
+  </>,
+  "MoreIcon",
+);
+
+export const EyeIcon = make(
+  <>
+    <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" />
+    <circle cx="12" cy="12" r="3" />
+  </>,
+  "EyeIcon",
+);
+
+export const CopyIcon = make(
+  <>
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </>,
+  "CopyIcon",
+);
+
+export const SdCardIcon = make(
+  <>
+    <path d="M12 6V4a1 1 0 0 0-1-1H7.5a1 1 0 0 0-.7.3L4 6.1V20a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V7a1 1 0 0 0-1-1h-7Z" />
+    <path d="M7 9h2M11 9h2" />
+  </>,
+  "SdCardIcon",
+);
+
+export const RecycleBinIcon = make(
+  <>
+    <path d="M3 6h18" />
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    <line x1="10" y1="11" x2="10" y2="17" />
+    <line x1="14" y1="11" x2="14" y2="17" />
+  </>,
+  "RecycleBinIcon",
+);
+
+export const CalendarIcon = make(
+  <>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </>,
+  "CalendarIcon",
+);
+
+export const TagIcon = make(
+  <>
+    <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+    <circle cx="7.5" cy="7.5" r="1.2" fill="currentColor" stroke="none" />
+  </>,
+  "TagIcon",
+);
+
+export const ImageImportIcon = make(
+  <>
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </>,
+  "ImageImportIcon",
+);
+
+export const MapPinIcon = make(
+  <>
+    <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+    <circle cx="12" cy="10" r="3" />
+  </>,
+  "MapPinIcon",
+);
+
+export const ZapIcon = make(
+  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />,
+  "ZapIcon",
+);
+
+export const FolderSearchIcon = make(
+  <>
+    <path d="M4 20h7.5" />
+    <path d="M14 12.5V5a1 1 0 0 0-1-1H9.5L8 3H5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h3.5" />
+    <circle cx="16" cy="16" r="4" />
+    <path d="m19 19 3 3" />
+  </>,
+  "FolderSearchIcon",
+);
+
+export const FileSearchIcon = make(
+  <>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h4" />
+    <path d="M14 2v4a2 2 0 0 0 2 2h2" />
+    <path d="M14 2 20 8" />
+    <circle cx="15.5" cy="16.5" r="4" />
+    <path d="m18.5 19.5 3 3" />
+  </>,
+  "FileSearchIcon",
+);

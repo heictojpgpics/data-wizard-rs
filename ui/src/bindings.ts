@@ -80,6 +80,10 @@ export interface StartScanResponse {
   scan_id: string;
 }
 
+export interface SetScanPausedResponse {
+  paused: boolean;
+}
+
 export interface ListResultsResponse {
   total: number;
   spilled: number;

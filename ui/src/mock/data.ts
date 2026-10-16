@@ -136,6 +136,8 @@ interface FileTemplate {
   weight: number;
   /** Mostly-deleted carve population (deep scan only)? */
   deep?: boolean;
+  /** Still-present (not deleted) population? */
+  existing?: boolean;
 }
 
 const TEMPLATES: FileTemplate[] = [
@@ -170,6 +172,12 @@ const TEMPLATES: FileTemplate[] = [
     min: 200 * 1024, max: 6 * MB, weight: 6,
   },
   {
+    dir: "$Recycle.Bin\\S-1-5-21-3623811015-3361044348-30300820-1013",
+    names: ["$R{n}IMG_4{n}2", "$R{n}report", "$R{n}old-thesis"],
+    exts: ["jpg", "pdf", "docx", "png"],
+    min: 300 * 1024, max: 24 * MB, weight: 9,
+  },
+  {
     dir: "Users\\anna\\Music",
     names: ["track_{n}", "live-set-{n}", "podcast-ep{n}"],
     exts: ["mp3", "flac", "m4a"],
@@ -200,16 +208,29 @@ const TEMPLATES: FileTemplate[] = [
     min: 4 * 1024, max: 80 * MB, weight: 3,
   },
   {
-    dir: "Unallocated (carved)",
+    dir: "/carved",
     names: ["carved_{n}", "frag_{n}", "recovered-{n}"],
     exts: ["jpg", "jpg", "png", "mp4", "pdf", "zip", "mp3"],
     min: 300 * 1024, max: 60 * MB, weight: 18, deep: true,
   },
   {
-    dir: "Unallocated (carved)",
+    dir: "/carved",
     names: ["deep_{n}", "raw_{n}"],
     exts: ["nef", "cr3", "dng", "mov"],
     min: 12 * MB, max: 80 * MB, weight: 8, deep: true,
+  },
+  /* Existing (not deleted) files — the "Existing Files" group. */
+  {
+    dir: "Users\\anna\\Pictures\\Camera Roll",
+    names: ["IMG_{n}", "DSC_{n}"],
+    exts: ["jpg", "png"],
+    min: 2 * MB, max: 8 * MB, weight: 6, existing: true,
+  },
+  {
+    dir: "Users\\anna\\Documents",
+    names: ["current-notes-{n}", "active-budget-{n}"],
+    exts: ["docx", "xlsx", "txt"],
+    min: 30 * 1024, max: 4 * MB, weight: 5, existing: true,
   },
 ];
 
@@ -235,13 +256,14 @@ function statusFor(isDeepFile: boolean, roll: number): RecoveryStatusDto {
 }
 
 function confidenceFor(s: RecoveryStatusDto): number {
+  /* The core's scale is 0..=1000 (1000 = fully validated). */
   switch (s) {
-    case "Intact": return randInt(92, 99);
-    case "CarvedValidated": return randInt(78, 95);
-    case "Carved": return randInt(45, 72);
-    case "PartiallyRecovered": return randInt(30, 65);
-    case "PendingValidation": return randInt(40, 60);
-    case "Overwritten": return randInt(1, 12);
+    case "Intact": return randInt(920, 990);
+    case "CarvedValidated": return randInt(780, 950);
+    case "Carved": return randInt(450, 720);
+    case "PartiallyRecovered": return randInt(300, 650);
+    case "PendingValidation": return randInt(400, 600);
+    case "Overwritten": return randInt(10, 120);
   }
 }
 
@@ -267,7 +289,8 @@ function buildPopulation(): MockEntry[] {
   for (const t of TEMPLATES) {
     for (let i = 0; i < t.weight; i++) {
       const isDeep = !!t.deep;
-      const status = statusFor(isDeep, rand());
+      const isExisting = !!t.existing;
+      const status = isExisting ? "Intact" : statusFor(isDeep, rand());
       const size = randInt(t.min, t.max);
       const ext = formatTemplate(t, i).split(".").pop() ?? "bin";
       out.push({
@@ -280,7 +303,7 @@ function buildPopulation(): MockEntry[] {
         extension: ext,
         mime: null,
         confidence: confidenceFor(status),
-        was_deleted: true,
+        was_deleted: !isExisting,
         foundOrder: n,
         deepOnly: isDeep,
       });

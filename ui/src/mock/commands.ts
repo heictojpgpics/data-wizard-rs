@@ -43,6 +43,8 @@ interface ScanRun {
   phase: ScanProgress["phase"];
   ticker: number | null;
   cancelled: boolean;
+  /** The pause gate (mirrors the Rust PausableSource). */
+  paused: boolean;
 }
 
 let run: ScanRun | null = null;
@@ -116,6 +118,7 @@ function emitProgress(p: Partial<ScanProgress> & { phase: ScanProgress["phase"] 
 /** Advance the run one tick (~120ms of engine time). */
 function tick(): void {
   if (!run || run.cancelled) return;
+  if (run.paused) return;
   const files = run.files;
 
   switch (run.phase) {
@@ -182,6 +185,7 @@ function startRun(deep: boolean): string {
     phase: "Probing",
     ticker: null,
     cancelled: false,
+    paused: false,
   };
   // Fast enough to feel real, slow enough to see the phases (~2-4s quick).
   run.ticker = window.setInterval(tick, 110);
@@ -315,6 +319,14 @@ const handlers: Record<string, (args: Req) => Promise<unknown>> = {
     return { cancelled: true };
   },
 
+  async set_scan_paused(args) {
+    const { paused } = req<{ scan_id: string; paused: boolean }>(args);
+    if (run) {
+      run.paused = paused;
+    }
+    return { paused: !!paused };
+  },
+
   async get_scan_progress() {
     if (!run) throw new Error("no active scan");
     return {
@@ -325,6 +337,7 @@ const handlers: Record<string, (args: Req) => Promise<unknown>> = {
         total: run.files.length,
         message: "",
       },
+      paused: run.paused,
     };
   },
 

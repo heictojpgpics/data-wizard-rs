@@ -78,6 +78,26 @@
   --st-overwritten: #dc2626;
   --st-pending: #82908a;
 
+  /* ── Recoverability verdict scale (the EaseUX "can I get it back" column) ── */
+  --rec-excellent: #16a34a;
+  --rec-good: #65a30d;
+  --rec-poor: #d97706;
+  --rec-lost: #dc2626;
+  --rec-excellent-soft: rgba(22, 163, 74, 0.12);
+  --rec-good-soft: rgba(101, 163, 13, 0.12);
+  --rec-poor-soft: rgba(217, 119, 6, 0.12);
+  --rec-lost-soft: rgba(220, 38, 38, 0.10);
+
+  /* ── Special-group accents (left tree; EaseUS group semantics) ───── */
+  --grp-deleted: #0d9488;
+  --grp-existing: #64748b;
+  --grp-lost: #7c3aed;
+  --grp-recycled: #0891b2;
+  --grp-deleted-soft: rgba(13, 148, 136, 0.10);
+  --grp-lost-soft: rgba(124, 58, 237, 0.10);
+  --grp-recycled-soft: rgba(8, 145, 178, 0.10);
+  --grp-existing-soft: rgba(100, 116, 139, 0.10);
+
   /* ── Shape & motion ───────────────────────────────────────────────── */
   --radius-xs: 6px;
   --radius-s: 8px;
@@ -189,6 +209,26 @@
   --st-partial: #f5a623;
   --st-overwritten: #f87171;
   --st-pending: #9aa8a2;
+
+  /* Recoverability verdict scale, lifted for dark. */
+  --rec-excellent: #34d399;
+  --rec-good: #a3e635;
+  --rec-poor: #f5a623;
+  --rec-lost: #f87171;
+  --rec-excellent-soft: rgba(52, 211, 153, 0.14);
+  --rec-good-soft: rgba(163, 230, 53, 0.12);
+  --rec-poor-soft: rgba(245, 166, 35, 0.14);
+  --rec-lost-soft: rgba(248, 113, 113, 0.12);
+
+  /* Special-group accents, lifted for dark. */
+  --grp-deleted: #2dd4bf;
+  --grp-existing: #94a3b8;
+  --grp-lost: #a78bfa;
+  --grp-recycled: #22d3ee;
+  --grp-deleted-soft: rgba(45, 212, 191, 0.13);
+  --grp-lost-soft: rgba(167, 139, 250, 0.13);
+  --grp-recycled-soft: rgba(34, 211, 238, 0.13);
+  --grp-existing-soft: rgba(148, 163, 184, 0.13);
 
   /* Elevation (deeper in the dark family). */
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);

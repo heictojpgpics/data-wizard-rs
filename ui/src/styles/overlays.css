@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════════════
- * Overlays — dialogs (recovery flow), the theme picker popover, the
- * scrim, and toasts.
+ * Overlays — scrim + dialog chrome, the destination dialog, the recovery
+ * progress + summary dialogs, the theme picker popover, and toasts.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Scrim ────────────────────────────────────────────────────────────── */
@@ -16,11 +16,6 @@
   padding: 24px;
 }
 
-.dw-stream-skel {
-  height: 20px;
-  margin: 3px 2px;
-}
-
 /* ── Dialog chrome ────────────────────────────────────────────────────── */
 .dw-dialog {
   width: min(560px, 100%);
@@ -32,390 +27,408 @@
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-pop);
   overflow: hidden;
+  animation: dw-pop-in var(--dur-fast) var(--ease-overshoot);
 }
-
 .dw-dialog-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 18px 20px 0;
 }
-
 .dw-dialog-head h2 {
   font-size: 16px;
   font-weight: 750;
   letter-spacing: -0.01em;
   color: var(--text);
 }
-
-.dw-dialog-body {
-  padding: 16px 20px;
+.dw-dialog-actions {
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-  overflow-y: auto;
-}
-
-.dw-dialog-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 20px 18px;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px 18px;
   border-top: 1px solid var(--divider);
+  margin-top: auto;
 }
 
-.dw-dialog-foot-actions {
+/* ═══ Destination dialog ═══════════════════════════════════════════════ */
+
+.dw-dest {
+  width: min(640px, 100%);
+}
+.dw-dest-sub {
+  margin: 0;
+  padding: 10px 20px 4px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.dw-dest-list {
+  margin: 10px 20px;
   display: flex;
+  flex-direction: column;
   gap: 8px;
+  overflow-y: auto;
+  max-height: 300px;
 }
-
-/* ── Recovery: destination picker ─────────────────────────────────────── */
-.dw-rc-dest {
+.dw-dest-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 13px 14px;
-  border-radius: var(--radius-m);
-  border: 1.5px dashed var(--control-border);
-  background: var(--panel);
-  cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
-}
-.dw-rc-dest:hover {
-  border-color: var(--ink);
-  background: var(--ink-soft);
-}
-
-.dw-rc-dest-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-s);
-  display: grid;
-  place-items: center;
-  background: var(--chip);
-  color: var(--text-secondary);
-  flex: none;
-}
-.dw-rc-dest:hover .dw-rc-dest-icon {
-  color: var(--ink);
-}
-
-.dw-rc-dest-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-  flex: 1;
-}
-
-.dw-rc-dest-label {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-tertiary);
-}
-
-.dw-rc-dest-path {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dw-rc-dest-change {
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--ink);
-  flex: none;
-}
-
-/* ── Recovery: notices ────────────────────────────────────────────────── */
-.dw-rc-warn {
-  display: flex;
-  gap: 9px;
-  align-items: flex-start;
-  padding: 11px 12px;
-  border-radius: var(--radius-m);
-  background: color-mix(in srgb, var(--st-partial) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--st-partial) 30%, transparent);
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.55;
-}
-.dw-rc-warn svg {
-  color: var(--st-partial);
-  flex: none;
-  margin-top: 1px;
-}
-.dw-rc-warn strong {
-  color: var(--text);
-}
-
-.dw-rc-notice {
-  display: flex;
-  gap: 9px;
-  align-items: flex-start;
-  padding: 11px 12px;
-  border-radius: var(--radius-m);
-  font-size: 12px;
-  line-height: 1.55;
-  background: var(--panel);
-  border: 1px solid var(--divider);
-  color: var(--text-secondary);
-}
-.dw-rc-notice svg {
-  flex: none;
-  margin-top: 1px;
-}
-.dw-rc-notice p + p {
-  margin-top: 4px;
-}
-.dw-rc-notice.dw-ok svg {
-  color: var(--free);
-}
-.dw-rc-notice.dw-warn {
-  background: color-mix(in srgb, var(--st-partial) 9%, transparent);
-  border-color: color-mix(in srgb, var(--st-partial) 30%, transparent);
-}
-.dw-rc-notice.dw-warn svg {
-  color: var(--st-partial);
-}
-.dw-rc-notice.dw-err {
-  background: var(--used-tint);
-  border-color: color-mix(in srgb, var(--used) 32%, transparent);
-}
-.dw-rc-notice.dw-err svg {
-  color: var(--used);
-}
-
-/* ── Recovery: policy cards ───────────────────────────────────────────── */
-.dw-rc-policy {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.dw-rc-policy-label {
-  font-size: 12px;
-  font-weight: 650;
-  color: var(--text-secondary);
-}
-
-.dw-rc-policy-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.dw-rc-policy-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 11px;
-  padding: 11px 12px;
-  border-radius: var(--radius-m);
+  gap: 13px;
+  padding: 11px 13px;
   border: 1.5px solid var(--border);
+  border-radius: var(--radius-m);
   background: var(--card);
   text-align: left;
-  transition: border-color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+  cursor: default;
+  transition:
+    border-color var(--dur-micro) var(--ease-out),
+    background var(--dur-micro) var(--ease-out);
 }
-.dw-rc-policy-card:hover {
+.dw-dest-row:hover:not(.dw-blocked) {
   border-color: var(--control-border);
 }
-.dw-rc-policy-card.dw-active {
+.dw-dest-row.dw-active {
   border-color: var(--ink);
   background: var(--ink-soft);
 }
-
-.dw-rc-policy-radio {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid var(--control-border);
-  margin-top: 1px;
+.dw-dest-row.dw-blocked {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.dw-dest-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
   flex: none;
-  display: grid;
-  place-items: center;
-  transition: border-color var(--dur-fast) var(--ease-out);
+  border-radius: var(--radius-s);
+  background: var(--chip);
+  color: var(--text-secondary);
 }
-.dw-rc-policy-card.dw-active .dw-rc-policy-radio {
-  border-color: var(--ink);
-}
-.dw-rc-policy-card.dw-active .dw-rc-policy-radio::after {
-  content: "";
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--ink);
-}
-
-.dw-rc-policy-body {
+.dw-dest-id {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 0;
+  gap: 4px;
+}
+.dw-dest-name {
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+.dw-dest-disk {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+.dw-dest-free {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.dw-dest-srcflag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--used-soft);
+  color: var(--used);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.dw-dest-browse {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px 4px;
+  flex-wrap: wrap;
+}
+.dw-dest-path {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dw-dest-policy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px 4px;
+  flex-wrap: wrap;
+}
+.dw-dest-policy-label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+.dw-dest-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 10px 20px 0;
+  padding: 10px 13px;
+  border-radius: var(--radius-m);
+  background: var(--rec-poor-soft);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.dw-dest-warn svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--rec-poor);
+}
+.dw-dest-warn.dw-danger {
+  background: var(--used-tint);
+  border: 1px solid var(--used);
+}
+.dw-dest-warn.dw-danger svg {
+  color: var(--used);
 }
 
-.dw-rc-policy-title {
+/* ═══ Recovery progress ════════════════════════════════════════════════ */
+
+.dw-recprog {
+  width: min(480px, 100%);
+  align-items: stretch;
+  padding: 22px 22px 18px;
+  gap: 16px;
+}
+.dw-recprog h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.dw-recprog h2 svg {
+  color: var(--ink);
+}
+.dw-rp-counters {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.dw-rp-big {
+  font-size: 26px;
+  font-weight: 750;
+  color: var(--text);
+}
+.dw-rp-of {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  font-weight: 550;
+}
+.dw-rp-bytes {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+.dw-track-elev {
+  box-shadow: var(--shadow-1);
+}
+.dw-rp-current {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  min-height: 20px;
+}
+.dw-rp-current-label {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.dw-rp-current-file {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text);
+  animation: dw-fade-in var(--dur-fast) var(--ease-out);
+}
+.dw-rp-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ═══ Recovery summary ═════════════════════════════════════════════════ */
+
+.dw-recsum {
+  width: min(560px, 100%);
+  align-items: center;
+  text-align: center;
+  padding: 26px 24px 20px;
+  gap: 10px;
+  position: relative;
+}
+.dw-recsum-x {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+.dw-recsum-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+}
+.dw-recsum-icon.dw-ok {
+  background: var(--rec-excellent-soft);
+  color: var(--rec-excellent);
+}
+.dw-recsum-icon.dw-mixed {
+  background: var(--rec-poor-soft);
+  color: var(--rec-poor);
+}
+.dw-recsum h2 {
+  margin: 2px 0 0;
+  font-size: 21px;
+  font-weight: 750;
+  letter-spacing: -0.012em;
+  color: var(--text);
+}
+.dw-recsum-sub {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+.dw-recsum-failed {
+  color: var(--used);
+}
+.dw-recsum-dest {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 9px 13px;
+  border-radius: var(--radius-m);
+  background: var(--chip);
+  border: 1px solid var(--divider);
+  font-size: 12.5px;
+}
+.dw-recsum-dest-label {
+  flex: none;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+.dw-recsum-dest-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text);
+  text-align: left;
+}
+.dw-recsum-failures {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: var(--radius-m);
+  background: var(--used-tint);
+  border: 1px solid color-mix(in oklab, var(--used) 40%, transparent);
+  text-align: left;
+}
+.dw-recsum-fail-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 650;
   color: var(--text);
 }
-
-.dw-rc-policy-hint {
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--text-tertiary);
+.dw-recsum-fail-head svg {
+  color: var(--used);
 }
-
-.dw-rc-summary-line {
+.dw-recsum-fail-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.dw-recsum-fail-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   font-size: 12.5px;
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Recovery: running ────────────────────────────────────────────────── */
-.dw-rc-running {
-  gap: 10px;
-}
-
-.dw-rc-progress-num {
-  font-size: 24px;
-  font-weight: 750;
-  letter-spacing: -0.01em;
   color: var(--text);
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
 }
-
-.dw-rc-progress-file {
-  text-align: center;
-  font-size: 12.5px;
-  color: var(--text-secondary);
+.dw-recsum-fail-why {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 45%;
 }
-
-.dw-rc-progress-bytes {
-  text-align: center;
-  font-size: 11.5px;
+.dw-recsum-fail-more {
+  font-size: 12px;
   color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
 }
-
-.dw-rc-stream {
+.dw-recsum-fail-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.dw-recsum-fail-reasons-label {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text-tertiary);
+}
+.dw-recsum-fail-reasons ol {
+  margin: 0;
+  padding-left: 18px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border: 1px solid var(--divider);
-  border-radius: var(--radius-m);
-  background: var(--panel);
-  padding: 7px 10px;
-  min-height: 118px;
-  max-height: 168px;
-  overflow: hidden;
-}
-
-.dw-rc-stream-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 24px;
   font-size: 11.5px;
-  animation: dw-row-in var(--dur-base) var(--ease-out);
-}
-
-.dw-rc-stream-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--free);
-  flex: none;
-}
-.dw-rc-stream-row.dw-fail .dw-rc-stream-dot {
-  background: var(--used);
-}
-
-.dw-rc-stream-name {
-  flex: 1;
-  min-width: 0;
-  color: var(--text);
-  font-weight: 550;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dw-rc-stream-bytes {
-  color: var(--text-tertiary);
-  font-variant-numeric: tabular-nums;
-  flex: none;
-}
-.dw-rc-stream-row.dw-fail .dw-rc-stream-bytes {
-  color: var(--used);
-}
-
-.dw-rc-running-note {
-  font-size: 11px;
   line-height: 1.5;
-  color: var(--text-tertiary);
-  text-align: center;
-}
-
-/* ── Recovery: summary ────────────────────────────────────────────────── */
-.dw-rc-result-hero {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.dw-rc-result-icon {
-  width: 46px;
-  height: 46px;
-  border-radius: var(--radius-m);
-  display: grid;
-  place-items: center;
-  background: var(--free);
-  color: #fff;
-  flex: none;
-}
-.dw-rc-result-icon.dw-mixed {
-  background: var(--st-partial);
-}
-
-.dw-rc-result-text h3 {
-  font-size: 15px;
-  font-weight: 750;
-  color: var(--text);
-}
-
-.dw-rc-result-text p {
-  margin-top: 2px;
-  font-size: 12.5px;
   color: var(--text-secondary);
-  line-height: 1.5;
 }
-
-.dw-rc-dest-inline {
-  font-family: var(--font-mono);
+.dw-recsum-warns {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--rec-poor);
+  text-align: left;
+}
+.dw-recsum-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+.dw-recsum-footnote {
+  margin: 4px 0 0;
+  max-width: 420px;
   font-size: 11.5px;
-  color: var(--text);
+  line-height: 1.6;
+  color: var(--text-tertiary);
 }
 
-/* ── Theme picker popover ─────────────────────────────────────────────── */
+/* ═══ Theme picker popover ═════════════════════════════════════════════ */
+
 .dw-theme-picker {
   position: relative;
   flex: none;
 }
-
 .dw-theme-popover {
   position: absolute;
   top: calc(100% + 8px);
@@ -429,7 +442,6 @@
   z-index: 50;
   animation: dw-pop-in var(--dur-base) var(--ease-overshoot);
 }
-
 .dw-theme-popover-title {
   font-size: 11px;
   font-weight: 700;
@@ -438,13 +450,11 @@
   color: var(--text-tertiary);
   margin-bottom: 9px;
 }
-
 .dw-theme-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 7px;
 }
-
 .dw-theme-card {
   display: flex;
   align-items: center;
@@ -455,7 +465,8 @@
   background: var(--card);
   position: relative;
   text-align: left;
-  transition: border-color var(--dur-fast) var(--ease-out),
+  transition:
+    border-color var(--dur-fast) var(--ease-out),
     background var(--dur-fast) var(--ease-out);
 }
 .dw-theme-card:hover {
@@ -465,7 +476,6 @@
   border-color: var(--ink);
   background: var(--ink-soft);
 }
-
 .dw-theme-swatch {
   display: flex;
   width: 30px;
@@ -483,41 +493,34 @@
 .dw-theme-swatch-ink {
   width: 12px;
 }
-
 .dw-theme-name {
   font-size: 12.5px;
   font-weight: 650;
   color: var(--text);
 }
-
 .dw-theme-check {
   position: absolute;
   right: 7px;
   color: var(--ink);
 }
 
-/* ── Toasts ───────────────────────────────────────────────────────────── */
-.dw-toast-zone {
+/* ═══ Toasts ═══════════════════════════════════════════════════════════ */
+
+.dw-toasts {
   position: fixed;
   bottom: calc(var(--status-h) + 14px);
-  left: 50%;
-  transform: translateX(-50%);
+  right: 18px;
   z-index: 70;
-  max-width: min(560px, calc(100vw - 48px));
-  animation: dw-slide-up var(--dur-base) var(--ease-overshoot);
-  transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 48px));
 }
-
-.dw-toast-zone.dw-closing {
-  opacity: 0;
-  transform: translateX(-50%) translateY(6px);
-}
-
 .dw-toast {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 11px 14px;
+  padding: 11px 13px;
   border-radius: var(--radius-m);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--card) 92%, transparent);
@@ -526,8 +529,15 @@
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text);
+  animation: dw-slide-up var(--dur-base) var(--ease-overshoot);
+  transition:
+    opacity 160ms var(--ease-out),
+    transform 160ms var(--ease-out);
 }
-
+.dw-toast.dw-closing {
+  opacity: 0;
+  transform: translateY(6px);
+}
 .dw-toast-icon {
   display: grid;
   place-items: center;
@@ -535,11 +545,40 @@
   margin-top: 1px;
 }
 .dw-toast.dw-ok .dw-toast-icon {
-  color: var(--free);
+  color: var(--rec-excellent);
 }
 .dw-toast.dw-err .dw-toast-icon {
   color: var(--used);
 }
+.dw-toast.dw-warn .dw-toast-icon {
+  color: var(--rec-poor);
+}
 .dw-toast.dw-info .dw-toast-icon {
   color: var(--ink);
+}
+.dw-toast-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.dw-toast-title {
+  font-weight: 650;
+}
+.dw-toast-text {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.dw-toast-x {
+  display: flex;
+  padding: 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+.dw-toast-x:hover {
+  background: var(--control-hover);
+  color: var(--text);
 }

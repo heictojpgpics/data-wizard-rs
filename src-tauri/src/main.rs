@@ -40,6 +40,7 @@ fn main() {
         // fail with PluginInitialization("log", ...) and kill the app at
         // startup. All log-crate records are forwarded into tracing instead.
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::list_disks,
@@ -50,6 +51,7 @@ fn main() {
             commands::resume_scan,
             commands::delete_saved_scan,
             commands::cancel_scan,
+            commands::set_scan_paused,
             commands::get_scan_progress,
             commands::list_results,
             commands::scan_stats,

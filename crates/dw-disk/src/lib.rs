@@ -13,6 +13,7 @@
 pub mod error;
 pub mod geometry;
 pub mod partition;
+pub mod pausable;
 pub mod source;
 pub mod vhd;
 #[cfg(windows)]

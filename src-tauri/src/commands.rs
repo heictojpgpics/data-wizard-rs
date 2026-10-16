@@ -167,7 +167,15 @@ pub async fn start_scan(
     let spill_dir = spills_dir(&state);
     let handle = dw_core::ScanHandle::with_spill_dir(cfg, Some(spill_dir));
     let scan_id = handle.id();
-    let record = ScanRecord::new(handle.clone(), req.source_uri.clone());
+
+    // The pause gate: shared between the record (command surface) and
+    // the PausableSource wrapping every read the engines issue.
+    let pause = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let source: Arc<dyn DiskSource> = Arc::new(dw_disk::pausable::PausableSource::new(
+        source,
+        Arc::clone(&pause),
+    ));
+    let record = ScanRecord::new(handle.clone(), req.source_uri.clone(), pause);
 
     let plugins = all_plugins();
 
@@ -217,6 +225,17 @@ pub async fn start_scan(
                             Err(_) => return,
                         };
                         if let Ok(src) = open_source(&source_path) {
+                            // Gate the fallback's reads with the same
+                            // pause flag the record owns.
+                            let gate = {
+                                let g = state_clone.read();
+                                g.scans
+                                    .get(&scan_id)
+                                    .map(|r| Arc::clone(&r.pause))
+                                    .unwrap_or_else(|| Arc::new(std::sync::atomic::AtomicBool::new(false)))
+                            };
+                            let src: Arc<dyn DiskSource> =
+                                Arc::new(dw_disk::pausable::PausableSource::new(src, gate));
                             let size = dw_disk::ReadAt::size(src.as_read_at().as_ref());
                             let db = std::sync::Arc::new(dw_signatures::SignatureDb::from_embedded());
                             let read_at = src.as_read_at();
@@ -341,6 +360,29 @@ pub async fn cancel_scan(
     }
 }
 
+/// Pause / resume a running scan. The pause flag gates the
+/// `PausableSource` wrapping the scan's reads: metadata walks and
+/// carving stall in place (no state is lost, no partial writes).
+#[tauri::command]
+pub async fn set_scan_paused(
+    state: State<'_, Arc<RwLock<AppState>>>,
+    req: SetScanPausedRequest,
+) -> Result<SetScanPausedResponse, String> {
+    let id = uuid::Uuid::parse_str(&req.scan_id).map_err(|e| e.to_string())?;
+    info!(scan_id = %id, paused = req.paused, "set_scan_paused");
+    let g = state.read();
+    let record = g
+        .scans
+        .get(&id)
+        .ok_or_else(|| "scan not found".to_string())?;
+    record
+        .pause
+        .store(req.paused, std::sync::atomic::Ordering::Relaxed);
+    Ok(SetScanPausedResponse {
+        paused: req.paused,
+    })
+}
+
 #[tauri::command]
 pub async fn get_scan_progress(
     state: State<'_, Arc<RwLock<AppState>>>,
@@ -362,6 +404,9 @@ pub async fn get_scan_progress(
         dw_core::ScanState::Failed => dto::ScanPhase::Failed,
     };
     let total = record.handle.results().len() as u64;
+    let paused = record
+        .pause
+        .load(std::sync::atomic::Ordering::Relaxed);
     Ok(GetScanProgressResponse {
         progress: dto::ScanProgress {
             scan_id: id.to_string(),
@@ -370,6 +415,7 @@ pub async fn get_scan_progress(
             total: 0,
             message: format!("{total} entries found"),
         },
+        paused,
     })
 }
 
@@ -745,7 +791,14 @@ pub async fn resume_scan(
     // Resume always re-runs the plugin pass over the restored entries;
     // identical findings replace their older twins at the end.
     handle.set_state(dw_core::ScanState::Created);
-    let record = ScanRecord::new(handle.clone(), source_uri_of(&config));
+
+    // Pause gate (same wiring as start_scan).
+    let pause = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let source: Arc<dyn DiskSource> = Arc::new(dw_disk::pausable::PausableSource::new(
+        source,
+        Arc::clone(&pause),
+    ));
+    let record = ScanRecord::new(handle.clone(), source_uri_of(&config), pause);
 
     let plugins = all_plugins();
     let app = {

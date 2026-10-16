@@ -1,203 +1,113 @@
 /**
- * File inspector — the details panel for the selected result row:
- * identity, timeline, status explanation, confidence meter and the
- * per-file recovery action. Slides in over the results view.
+ * FileInspector — the right-pane detail view (EaseUS PreviewMainDialog
+ * role, docked). Shows: type-tinted preview tile (per-category), the
+ * full path, size/dates/status/recoverability, and the recover action.
+ * Doubles as the closest thing to a preview until binary previewers
+ * land (the tile + metadata is honest about that).
  */
-import { useState } from "react";
-import { invoke } from "../lib/ipc";
-import type { FileRecoveryOutcome, RecoveredFile } from "../bindings";
-import {
-  CategoryGlyph,
-  CheckIcon,
-  DownloadIcon,
-  FolderIcon,
-  InfoIcon,
-  XIcon,
-} from "../lib/Icon";
-import {
-  categoryOf,
-  categoryVar,
-  fileKindLabel,
-  formatBytes,
-  formatDateTime,
-  parseFsTime,
-  statusExplanation,
-  statusLabel,
-  statusVar,
-} from "../lib/format";
-import { useAppStore } from "../state/app";
 
-export function FileInspector() {
-  const inspectedId = useAppStore((s) => s.inspectedId);
-  const setInspectedId = useAppStore((s) => s.setInspectedId);
-  const rows = useAppStore((s) => s.rows);
-  const selected = useAppStore((s) => s.selected);
-  const toggleSelected = useAppStore((s) => s.toggleSelected);
-  const setToast = useAppStore((s) => s.setToast);
+import { DownloadIcon, XIcon, MapPinIcon, CalendarIcon, LayersIcon } from "../lib/Icon";
+import { formatBytes, formatDateTime, statusLabel, statusExplanation, statusVar } from "../lib/format";
+import { useResultsStore } from "../state/results";
+import { useRecoveryStore } from "../state/recovery";
+import { TypeIcon } from "../components/ui/TypeIcon";
+import { RecoverabilityBadge } from "../components/ui/RecoverabilityBadge";
 
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const file = rows.find((r) => r.id === inspectedId) ?? null;
+export function FileInspector({ id, onClose }: { id: string; onClose: () => void }) {
+  const meta = useResultsStore((s) => s.byId.get(id));
+  const selected = useResultsStore((s) => s.selected);
+  const toggleSelected = useResultsStore((s) => s.toggleSelected);
+  const openRecovery = useRecoveryStore((s) => s.open);
 
-  if (!file) return null;
-
-  const busy = busyId === file.id;
-
-  const cat = categoryOf(file.extension);
-  const color = categoryVar(cat);
-  const date = parseFsTime(file.mtime);
-  const isSelected = selected.has(file.id);
-
-  async function recoverOne(f: RecoveredFile) {
-    setBusyId(f.id);
-    try {
-      const dest = await pickDestination();
-      if (!dest) {
-        setBusyId(null);
-        return;
-      }
-      const res = await invoke<{
-        recovered: number;
-        failed: number;
-        results: FileRecoveryOutcome[];
-      }>("recover_files", {
-        req: {
-          scan_id: useAppStore.getState().scanId,
-          entry_ids: [f.id],
-          destination_dir: dest,
-          collision_policy: "keep_both",
-        },
-      });
-      const out = res.results[0];
-      if (out?.ok) {
-        setToast({ text: `Recovered ${out.name} to ${out.path ?? dest}`, kind: "ok" });
-      } else {
-        setToast({ text: `Could not recover ${f.name}: ${out?.error ?? "unknown error"}`, kind: "err" });
-      }
-    } catch (e) {
-      setToast({ text: `Recovery failed: ${String(e)}`, kind: "err" });
-    } finally {
-      setBusyId(null);
-    }
-  }
+  if (!meta) return null;
+  const m = meta;
+  const f = m.file;
+  const isSel = selected.has(id);
 
   return (
-    <aside className="dw-inspector" aria-label="File details">
-      <div className="dw-inspector-head">
-        <span className="dw-inspector-title">File details</span>
-        <button
-          className="dw-btn-ghost dw-icon"
-          aria-label="Close details"
-          onClick={() => setInspectedId(null)}
-        >
+    <aside className="dw-inspector dw-slide-up" aria-label="File details">
+      <div className="dw-insp-head">
+        <span>File details</span>
+        <button className="dw-icon-btn dw-sm" aria-label="Close details" onClick={onClose}>
           <XIcon size={14} />
         </button>
       </div>
 
-      <div className="dw-inspector-body">
-        {/* Identity block */}
-        <div className="dw-fi-hero">
-          <span className="dw-fi-glyph" style={{ color, background: `color-mix(in srgb, ${color} 16%, transparent)` }}>
-            <CategoryGlyph cat={cat} size={26} />
-          </span>
-          <div className="dw-fi-id">
-            <span className="dw-fi-name dw-selectable-text" title={file.name}>
-              {file.name}
-            </span>
-            <span className="dw-fi-kind">
-              {fileKindLabel(file.extension)} · {file.extension.toUpperCase() || "no extension"}
-            </span>
-          </div>
+      <div className="dw-insp-scroll">
+        {/* Preview tile */}
+        <div className="dw-insp-preview" data-cat={m.cat}>
+          <TypeIcon name={f.name} extension={f.extension} size={64} badge={false} />
+          <span className="dw-insp-ext">.{f.extension || "—"}</span>
         </div>
 
-        <div className="dw-fi-badges">
-          <span className="dw-status-pill dw-lg" style={{ color: statusVar(file.status), borderColor: statusVar(file.status) }}>
-            {statusLabel(file.status)}
-          </span>
-          {file.was_deleted && <span className="dw-fi-deleted">Deleted on source</span>}
-        </div>
+        <h3 className="dw-insp-name dw-selectable-text" title={f.name}>
+          {f.name}
+        </h3>
+        <RecoverabilityBadge status={f.status} confidence={f.confidence} />
 
-        <p className="dw-fi-explain">{statusExplanation(file.status)}</p>
-
-        {/* Facts */}
-        <dl className="dw-fi-facts">
-          <div className="dw-fi-fact">
-            <dt>Size</dt>
-            <dd>{formatBytes(file.size_bytes)}</dd>
-          </div>
-          <div className="dw-fi-fact">
-            <dt>Modified</dt>
-            <dd>{formatDateTime(date)}</dd>
-          </div>
-          <div className="dw-fi-fact dw-fi-path">
-            <dt>Original folder</dt>
-            <dd className="dw-selectable-text">
-              <FolderIcon size={12} />
-              {file.parent_path}
+        {/* Metadata table */}
+        <dl className="dw-insp-meta">
+          <div className="dw-insp-row">
+            <dt>
+              <MapPinIcon size={12} /> Location
+            </dt>
+            <dd className="dw-selectable-text" title={`${f.parent_path}/${f.name}`}>
+              {f.parent_path}
             </dd>
+          </div>
+          <div className="dw-insp-row">
+            <dt>
+              <LayersIcon size={12} /> Size
+            </dt>
+            <dd className="tnum">{formatBytes(f.size_bytes)}</dd>
+          </div>
+          <div className="dw-insp-row">
+            <dt>
+              <CalendarIcon size={12} /> Modified
+            </dt>
+            <dd>{m.mtime ? formatDateTime(m.mtime) : "unknown"}</dd>
+          </div>
+          <div className="dw-insp-row">
+            <dt>Status</dt>
+            <dd style={{ color: statusVar(f.status) }}>{statusLabel(f.status)}</dd>
+          </div>
+          <div className="dw-insp-row">
+            <dt>Origin</dt>
+            <dd>
+              {m.group === "deleted"
+                ? "Deleted from the filesystem"
+                : m.group === "recycled"
+                  ? "From the Recycle Bin"
+                  : m.group === "lost"
+                    ? "Carved from unallocated space"
+                    : "Still present on the volume"}
+            </dd>
+          </div>
+          <div className="dw-insp-row">
+            <dt>MIME</dt>
+            <dd>{f.mime ?? "unknown"}</dd>
           </div>
         </dl>
 
-        {/* Confidence meter */}
-        <div className="dw-fi-conf">
-          <div className="dw-fi-conf-head">
-            <span>Recovery confidence</span>
-            <span className="dw-fi-conf-num">{file.confidence}%</span>
-          </div>
-          <div className="dw-track">
-            <div
-              className="dw-track-fill"
-              style={{ width: `${Math.max(3, file.confidence)}%`, background: statusVar(file.status) }}
-            />
-          </div>
-          <p className="dw-fi-conf-note">
-            How strongly the engine believes this file will come back whole —
-            from intact metadata (high) to a bare header match (low).
-          </p>
-        </div>
-
-        <InfoNote />
+        <p className="dw-insp-explain">{statusExplanation(f.status)}</p>
       </div>
 
-      {/* Actions */}
-      <div className="dw-inspector-foot">
+      <div className="dw-insp-actions">
         <button
-          className="dw-btn-outline"
-          onClick={() => toggleSelected(file.id)}
+          className={`dw-btn-outline${isSel ? " dw-on" : ""}`}
+          onClick={() => toggleSelected(id)}
         >
-          <CheckIcon size={14} />
-          {isSelected ? "Unselect" : "Add to selection"}
+          {isSel ? "Deselect" : "Select for recovery"}
         </button>
-        <button className="dw-btn-ink" disabled={busy} onClick={() => void recoverOne(file)}>
-          {busy ? <span className="dw-spinner" /> : <DownloadIcon size={14} />}
+        <button
+          className="dw-btn-ink"
+          onClick={() => openRecovery([m])}
+          disabled={f.status === "Overwritten"}
+        >
+          <DownloadIcon size={15} />
           Recover this file
         </button>
       </div>
     </aside>
   );
-}
-
-function InfoNote() {
-  return (
-    <div className="dw-fi-note">
-      <InfoIcon size={14} />
-      <span>
-        Recovery copies from the source to a destination you pick — the
-        source itself is never written to.
-      </span>
-    </div>
-  );
-}
-
-/** Destination picker: the native dialog in Tauri, a stand-in path in
- * the browser mock. */
-export async function pickDestination(): Promise<string | null> {
-  try {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const chosen = await open({ title: "Choose a recovery destination", directory: true, multiple: false });
-    if (typeof chosen === "string" && chosen.length > 0) return chosen;
-    return null;
-  } catch {
-    // Browser mock: simulate a chosen folder.
-    return "C:\\Recovered";
-  }
 }

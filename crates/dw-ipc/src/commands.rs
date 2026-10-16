@@ -50,6 +50,20 @@ pub struct GetScanProgressRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct GetScanProgressResponse {
     pub progress: ScanProgress,
+    /// True while the source reads are gated (user pressed Pause).
+    #[serde(default)]
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SetScanPausedRequest {
+    pub scan_id: String,
+    pub paused: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub struct SetScanPausedResponse {
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

@@ -1,309 +1,303 @@
 /**
- * Scanning view — the phase timeline, live progress with rate, and the
- * streaming "found files" feed. Terminal states render a summary panel
- * that hands off to the results view.
+ * Scanning view — the EaseUS ScanningView parity.
+ *
+ *   phase timeline     Probing → Quick scan → Deep scan (sector map)
+ *   progress cluster   odometer (files found) + phase bar + rate/ETA/elapsed
+ *   live feed          streaming found-file rows (from the results store,
+ *                      which the scan pump keeps filling)
+ *   category chips     live per-category counters (pop on update)
+ *   controls           Pause/Resume · Stop (confirm) · Browse results now
+ *   tip carousel       rotating reassurance copy (the EaseUS corpus)
  */
-import { useEffect, useRef, useState } from "react";
-import { invoke } from "../lib/ipc";
-import type { RecoveredFile, ScanProgress } from "../bindings";
-import {
-  ArrowRightIcon,
-  CategoryGlyph,
-  CheckIcon,
-  CircleCheckIcon,
-  CircleXIcon,
-  RefreshIcon,
-  ShieldCheckIcon,
-  XIcon,
-} from "../lib/Icon";
-import { categoryOf, categoryVar, formatBytes, formatCount, formatRate } from "../lib/format";
-import { useAppStore } from "../state/app";
-import { useScanStore } from "../state/scan";
 
-const PHASES: { key: ScanProgress["phase"]; label: string; hint: string }[] = [
-  { key: "Probing", label: "Identify", hint: "Reading the volume boot record and picking the right engine" },
-  { key: "QuickScan", label: "File records", hint: "Walking the filesystem's own metadata" },
-  { key: "DeepScan", label: "Unallocated", hint: "Scanning free space cluster-by-cluster" },
-  { key: "Carving", label: "Carving", hint: "Rebuilding files from raw signatures" },
-  { key: "Finalizing", label: "Finishing", hint: "Building the results index" },
+import { useEffect, useMemo, useState } from "react";
+import {
+  PauseIcon,
+  PlayIcon,
+  StopIcon,
+  EyeIcon,
+  ScanSearchIcon,
+  ZapIcon,
+  FileSearchIcon,
+  CircleCheckIcon,
+  CategoryGlyph,
+} from "../lib/Icon";
+import { formatBytes, CATEGORY_ORDER_SAFE } from "../lib/format";
+import { useAppStore } from "../state/app";
+import { useScanStore, formatClock, formatEta } from "../state/scan";
+import { useResultsStore } from "../state/results";
+import { useUiStore } from "../state/ui";
+import { Odometer } from "../components/ui/Odometer";
+import { TypeIcon } from "../components/ui/TypeIcon";
+import { RecoverabilityBadge } from "../components/ui/RecoverabilityBadge";
+
+const TIPS = [
+  "Quick scan reads the filesystem's own records — deleted files usually appear within minutes.",
+  "Files stream in while the scan runs. You can preview and recover them before it finishes.",
+  "Deep scan reads every sector and rebuilds files by signature — the best odds for files lost long ago.",
+  "It is highly probable your data is recoverable — most files survive deletion until overwritten.",
+  "Nothing is written to the source drive at any point. Scanning is strictly read-only.",
 ];
 
-/** Quick scans skip the deep phases — map timeline accordingly. */
-function phaseIndex(p: ScanProgress["phase"], deep: boolean): number {
-  switch (p) {
-    case "Probing":
-      return 0;
-    case "QuickScan":
-      return 1;
-    case "DeepScan":
-      return 2;
-    case "Carving":
-      return deep ? 3 : 2;
-    case "Finalizing":
-      return deep ? 4 : 3;
-    case "Done":
-      return deep ? 5 : 4;
-    case "Cancelled":
-    case "Failed":
-      return 0;
-  }
+function PhaseTimeline({ phase }: { phase: string }) {
+  const steps = [
+    { id: "probing", label: "Opening source" },
+    { id: "quick", label: "Quick scan" },
+    { id: "deep", label: "Deep scan" },
+  ];
+  const cur =
+    phase === "probing" ? 0 : phase === "quick" ? 1 : phase === "quickComplete" || phase === "deep" ? 2 : 2;
+  return (
+    <div className="dw-phase-line" role="progressbar" aria-valuemin={0} aria-valuemax={3} aria-valuenow={cur}>
+      {steps.map((s, i) => (
+        <div
+          key={s.id}
+          className={`dw-phase-step${i < cur ? " dw-done" : ""}${i === cur ? " dw-current" : ""}`}
+        >
+          <span className="dw-phase-dot" aria-hidden />
+          <span className="dw-phase-label">{s.label}</span>
+          {i < steps.length - 1 && <span className="dw-phase-conn" aria-hidden />}
+        </div>
+      ))}
+    </div>
+  );
 }
 
-export function ScanningView({ onViewResults }: { onViewResults: () => void }) {
-  const scanId = useAppStore((s) => s.scanId);
-  const deep = useAppStore((s) => s.scanDeep);
-  const source = useAppStore((s) => s.source);
-  const liveFeed = useAppStore((s) => s.liveFeed);
-  const pushLiveFeed = useAppStore((s) => s.pushLiveFeed);
-  const clearScan = useAppStore((s) => s.clearScan);
-  const progress = useScanStore((s) => s.progress);
-  const rate = useScanStore((s) => s.rate);
-  const cancelScan = useScanStore((s) => s.cancelScan);
-
-  const startedAt = useAppStore((s) => s.scanStartedAt);
-  const [now, setNow] = useState(() => Date.now());
-  const feedTimer = useRef<number | null>(null);
-
-  // Clock for the elapsed display.
+function TipCarousel() {
+  const [i, setI] = useState(0);
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 500);
+    const t = window.setInterval(() => setI((v) => (v + 1) % TIPS.length), 9000);
     return () => window.clearInterval(t);
   }, []);
+  return (
+    <div className="dw-tip-carousel" aria-live="polite">
+      <span className="dw-tip-bulb" aria-hidden>
+        <ZapIcon size={14} />
+      </span>
+      <span key={i} className="dw-tip-text dw-fade-in">
+        {TIPS[i]}
+      </span>
+    </div>
+  );
+}
 
-  // Live "found" feed: poll the growing results while QuickScan runs
-  // (the engine's own streaming path fills list_results as it finds).
-  useEffect(() => {
-    if (!scanId) return;
-    const stopPhases: ScanProgress["phase"][] = ["Done", "Cancelled", "Failed", "Finalizing"];
-    feedTimer.current = window.setInterval(async () => {
-      const ph = useScanStore.getState().progress?.phase;
-      if (!ph || stopPhases.includes(ph)) return;
-      try {
-        const res = await invoke<{ items: RecoveredFile[]; total: number }>("list_results", {
-          req: { scan_id: scanId, offset: 0, limit: 8, extension_filter: null },
-        });
-        if (res.items && res.items.length > 0) {
-          for (const f of res.items.slice(0, 8)) pushLiveFeed(f);
-        }
-      } catch {
-        /* transient (spill tier warming) — next tick retries */
-      }
-    }, 420);
-    return () => {
-      if (feedTimer.current !== null) window.clearInterval(feedTimer.current);
-    };
-  }, [scanId, pushLiveFeed]);
+export function ScanningView() {
+  const app = useAppStore();
+  const phase = useScanStore((s) => s.phase);
+  const paused = useScanStore((s) => s.paused);
+  const elapsed = useScanStore((s) => s.elapsedMs);
+  const rate = useScanStore((s) => s.ratePerSec);
+  const eta = useScanStore((s) => s.etaSec);
+  const found = useScanStore((s) => s.found);
+  const pause = useScanStore((s) => s.pause);
+  const unpause = useScanStore((s) => s.unpause);
+  const stop = useScanStore((s) => s.stop);
+  const dismiss = useScanStore((s) => s.dismissQuickComplete);
+  const openConfirm = useUiStore((s) => s.openConfirm);
+  const setStage = useAppStore((s) => s.setStage);
 
-  // Terminal hand-off: brief success beat, then results.
-  useEffect(() => {
-    if (progress?.phase === "Done") {
-      const t = window.setTimeout(onViewResults, 650);
-      return () => window.clearTimeout(t);
-    }
-  }, [progress?.phase, onViewResults]);
+  const all = useResultsStore((s) => s.all);
+  const catCount = useResultsStore((s) => s.catCount);
+  const revision = useResultsStore((s) => s.revision);
 
-  if (!scanId) return null;
+  /* The feed: the 30 most-recently-found files. */
+  const feed = useMemo(() => all.slice(-30).reverse(), [all]);
+  const cats = useMemo(
+    () => CATEGORY_ORDER_SAFE.map((c) => ({ cat: c, count: catCount.get(c)?.files ?? 0 })),
+    [catCount],
+  );
 
-  const phase = progress?.phase ?? "Probing";
-  const done = phase === "Done";
-  const failed = phase === "Failed";
-  const cancelled = phase === "Cancelled";
-  const terminal = done || failed || cancelled;
-
-  const activeIdx = terminal ? (done ? PHASES.length : -1) : phaseIndex(phase, deep);
-  const visiblePhases = deep ? PHASES : PHASES.filter((p) => p.key !== "DeepScan");
+  /* Phase-local progress (records walked / total from the engine). */
+  const progress = useScanStore((s) => s.progress);
   const pct =
     progress && progress.total > 0
-      ? Math.min(100, (progress.current / progress.total) * 100)
-      : 0;
-  const found = progress?.current ?? 0;
-  const elapsed = Math.max(0, (now - startedAt) / 1000);
+      ? Math.min(100, Math.round((progress.current / progress.total) * 100))
+      : null;
+
+  const phaseLabel =
+    phase === "probing"
+      ? "Opening the source and identifying the filesystem…"
+      : phase === "quick"
+        ? "Quick scanning — reading the filesystem's records"
+        : phase === "deep"
+          ? "Deep scanning — sector-by-sector with signature carving"
+          : phase === "quickComplete"
+            ? "Quick scan complete — deep scan is finding more files"
+            : "Finishing up — organizing what was found";
+
+  if (phase === "quickComplete") {
+    /* The interstitial: quick results are ready, deep is running. */
+    return (
+      <div className="dw-scan-page">
+        <div className="dw-scan-hero dw-quickdone dw-pop-in">
+          <span className="dw-quickdone-icon">
+            <CircleCheckIcon size={34} />
+          </span>
+          <h1>Quick scan complete!</h1>
+          <p>
+            <b className="tnum">{found.toLocaleString()}</b> files are ready to browse right now.
+            The deep scan keeps running in the background and streams in anything else it finds —
+            files lost long ago, after a format, or with damaged records.
+          </p>
+          <div className="dw-quickdone-stats">
+            {cats
+              .filter((c) => c.count > 0)
+              .slice(0, 6)
+              .map((c) => (
+                <span key={c.cat} className="dw-quickdone-stat">
+                  <CategoryGlyph cat={c.cat} size={14} />
+                  <span className="tnum">{c.count.toLocaleString()}</span>
+                </span>
+              ))}
+          </div>
+          <div className="dw-quickdone-actions">
+            <button className="dw-btn-ink dw-lg" onClick={dismiss}>
+              <EyeIcon size={16} />
+              Browse results now
+            </button>
+            <span className="dw-quickdone-note">
+              Deep scan continues while you browse — new files appear live.
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="dw-scan-page">
-      <div className={`dw-scan-card${terminal ? " dw-terminal" : ""}`}>
-        {/* ── Header: source + mode + readonly badge ─────────────────── */}
-        <div className="dw-scan-head">
-          <div className="dw-scan-source">
-            <span className="dw-scan-source-label">Scanning</span>
-            <span className="dw-scan-source-name dw-selectable-text">{source?.label ?? "Source"}</span>
-            <span className="dw-scan-source-detail">{source?.detail}</span>
-          </div>
-          <div className="dw-scan-badges">
-            <span className={`dw-mode-badge${deep ? " dw-deep" : ""}`}>
-              {deep ? "Deep scan" : "Quick scan"}
-            </span>
-            <span className="dw-readonly-inline" title="The scan only reads from this source">
-              <ShieldCheckIcon size={13} />
-              Read-only
-            </span>
-          </div>
+      <div className="dw-scan-hero">
+        <div className={`dw-scan-glyph${paused ? " dw-paused" : ""}`} aria-hidden>
+          <ScanSearchIcon size={38} />
+          <span className="dw-scan-ring" />
+          <span className="dw-scan-ring dw-r2" />
         </div>
-
-        {/* ── The orb: pulsing while working, resolved at terminal ────── */}
-        <div className="dw-scan-orb-zone">
-          <div className={`dw-scan-orb${terminal ? " dw-done" : ""}${failed ? " dw-failed" : ""}`}>
-            {!terminal && <span className="dw-scan-orb-ring" aria-hidden />}
-            <span className="dw-scan-orb-icon">
-              {done ? (
-                <CheckIcon size={26} />
-              ) : failed ? (
-                <XIcon size={26} />
-              ) : cancelled ? (
-                <XIcon size={26} />
-              ) : (
-                <RefreshIcon size={24} className="dw-scan-orb-spin" />
-              )}
+        <div className="dw-scan-title-block">
+          <h1>
+            {paused
+              ? "Scan paused"
+              : phase === "probing"
+                ? "Reading the source…"
+                : phase === "deep"
+                  ? "Deep scanning"
+                  : "Quick scanning"}
+            <span className="dw-scan-count">
+              <span className="dw-scan-count-label">Files found:</span>{" "}
+              <Odometer value={found} className="dw-scan-odo" />
             </span>
-          </div>
-          <div className="dw-scan-status-line">
-            {done ? (
-              <span className="dw-scan-status dw-ok">Scan complete</span>
-            ) : failed ? (
-              <span className="dw-scan-status dw-err">Scan failed</span>
-            ) : cancelled ? (
-              <span className="dw-scan-status dw-muted">Scan cancelled</span>
-            ) : (
-              <span className="dw-scan-status dw-live">
-                <span className="dw-live-dot" aria-hidden />
-                {PHASES.find((p) => p.key === phase)?.hint ?? "Working…"}
-              </span>
-            )}
-            {progress?.message && !terminal && (
-              <span className="dw-scan-message dw-selectable-text">{progress.message}</span>
-            )}
-            {failed && progress?.message && (
-              <span className="dw-scan-message dw-err dw-selectable-text">{progress.message}</span>
-            )}
-          </div>
+          </h1>
+          <p className="dw-scan-sub">{phaseLabel}</p>
+          <PhaseTimeline phase={phase} />
         </div>
+      </div>
 
-        {/* ── Phase timeline ──────────────────────────────────────────── */}
-        <ol className={`dw-timeline${terminal && !done ? " dw-muted" : ""}`}>
-          {visiblePhases.map((p, i) => {
-            const state =
-              done || i < activeIdx ? "done" : i === activeIdx ? "active" : "todo";
-            return (
-              <li key={p.key} className={`dw-tl-step dw-${state}`} aria-current={state === "active" ? "step" : undefined}>
-                <span className="dw-tl-dot" aria-hidden />
-                <span className="dw-tl-label">{p.label}</span>
-                <span className="dw-tl-bar" aria-hidden />
-              </li>
-            );
-          })}
-        </ol>
-
-        {/* ── Progress + counters ─────────────────────────────────────── */}
-        {!terminal && (
-          <>
-            <div className="dw-scan-progress">
-              <div className="dw-track dw-lg">
-                <div className="dw-track-fill dw-active" style={{ width: `${Math.max(2, pct)}%` }} />
-              </div>
-              <div className="dw-scan-progress-meta">
-                <span className="dw-scan-progress-pct">{pct.toFixed(0)}%</span>
-                {rate != null && <span className="dw-scan-progress-rate">{formatRate(rate)}</span>}
-                <span className="dw-scan-progress-elapsed">{formatElapsed(elapsed)}</span>
-              </div>
-            </div>
-
-            <div className="dw-scan-counters">
-              <div className="dw-scan-counter">
-                <span className="dw-scan-counter-num">{formatCount(found)}</span>
-                <span className="dw-scan-counter-label">files found</span>
-              </div>
-              <div className="dw-scan-counter dw-quiet">
-                <span className="dw-scan-counter-num">live</span>
-                <span className="dw-scan-counter-label">results stream in below as they are found</span>
-              </div>
-            </div>
-
-            {/* ── Live found feed ─────────────────────────────────────── */}
-            <div className="dw-scan-feed" aria-live="polite">
-              {liveFeed.length === 0 ? (
-                <div className="dw-scan-feed-empty">
-                  <div className="dw-skeleton dw-feed-skel" />
-                  <div className="dw-skeleton dw-feed-skel" />
-                  <div className="dw-skeleton dw-feed-skel" />
-                </div>
-              ) : (
-                liveFeed.slice(0, 7).map((f, i) => {
-                  const cat = categoryOf(f.extension);
-                  return (
-                    <div key={f.id} className="dw-feed-row" style={{ animationDelay: `${Math.min(i, 4) * 24}ms` }}>
-                      <span className="dw-feed-glyph" style={{ color: categoryVar(cat) }}>
-                        <CategoryGlyph cat={cat} size={14} />
-                      </span>
-                      <span className="dw-feed-name dw-selectable-text">{f.name}</span>
-                      <span className="dw-feed-path dw-selectable-text">{f.parent_path}</span>
-                      <span className="dw-feed-size">{formatBytes(f.size_bytes)}</span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            <div className="dw-scan-actions">
-              <button className="dw-btn-outline dw-danger" onClick={() => void cancelScan()}>
-                <XIcon size={14} />
-                Cancel scan
-              </button>
-              <span className="dw-scan-cancel-note">
-                Partial results are kept — you can review whatever was found so far.
+      <div className="dw-scan-progress-card">
+        <div className={`dw-track dw-lg${paused ? " dw-paused" : ""}`}>
+          <div
+            className="dw-track-fill dw-active"
+            style={{ width: pct != null ? `${pct}%` : "100%" }}
+          />
+        </div>
+        <div className="dw-scan-metrics tnum">
+          <span>{pct != null ? `${pct}%` : "measuring…"}</span>
+          <span>Elapsed {formatClock(elapsed)}</span>
+          {rate != null && <span>{Math.round(rate * 60).toLocaleString()} files/min</span>}
+          <span>{formatEta(eta)}</span>
+        </div>
+        <div className="dw-cat-chips" aria-label="Found by type">
+          {cats.map((c) => (
+            <span
+              key={c.cat}
+              className={`dw-cat-chip${c.count > 0 ? " dw-live" : ""}`}
+              data-cat={c.cat}
+            >
+              <CategoryGlyph cat={c.cat} size={13} />
+              <span className="dw-cat-chip-count tnum dw-count-pop" key={`${c.cat}-${c.count}`}>
+                {c.count.toLocaleString()}
               </span>
-            </div>
-          </>
-        )}
+            </span>
+          ))}
+        </div>
+      </div>
 
-        {/* ── Terminal panels ─────────────────────────────────────────── */}
-        {done && (
-          <div className="dw-scan-summary dw-slide-up">
-            <div className="dw-scan-summary-icon">
-              <CircleCheckIcon size={22} />
+      <div className="dw-scan-feed">
+        <div className="dw-scan-feed-head">
+          <FileSearchIcon size={14} />
+          <span>Live findings</span>
+          <span className="dw-scan-feed-note">
+            Streaming as the scan finds them — preview and recovery stay open the whole time
+          </span>
+        </div>
+        <div className="dw-scan-feed-list" key={revision}>
+          {feed.length === 0 ? (
+            <div className="dw-scan-feed-empty">
+              First findings appear within seconds — the engine is reading the filesystem index
+              right now.
             </div>
-            <div className="dw-scan-summary-body">
-              <h3>Found {formatCount(found)} files</h3>
-              <p>Review them, filter by type, and recover what you need.</p>
-            </div>
-            <button className="dw-btn-ink dw-lg" onClick={onViewResults}>
-              Review files
-              <ArrowRightIcon size={15} />
+          ) : (
+            feed.map((f) => (
+              <div key={f.id} className="dw-scan-feed-row dw-row-in">
+                <TypeIcon name={f.name} extension={f.extension} size={22} />
+                <span className="dw-scan-feed-name dw-selectable-text">{f.name}</span>
+                <span className="dw-scan-feed-path dw-selectable-text">{f.parent_path}</span>
+                <span className="dw-scan-feed-size tnum">{formatBytes(f.size_bytes)}</span>
+                <RecoverabilityBadge status={f.status} confidence={f.confidence} short />
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="dw-scan-controls">
+        <div className="dw-scan-controls-left">
+          {paused ? (
+            <button className="dw-btn-ink" onClick={() => void unpause()}>
+              <PlayIcon size={15} />
+              Resume
             </button>
-          </div>
-        )}
-        {(failed || cancelled) && (
-          <div className="dw-scan-summary dw-muted-panel dw-slide-up">
-            <div className="dw-scan-summary-icon dw-warn">
-              <CircleXIcon size={22} />
-            </div>
-            <div className="dw-scan-summary-body">
-              <h3>{failed ? "The scan could not finish" : "Scan cancelled"}</h3>
-              <p>
-                {failed
-                  ? "The engine reported an error. Details above; nothing on the source was modified."
-                  : `Partial results were kept${found > 0 ? ` — ${formatCount(found)} files were found before stopping` : ""}.`}
-              </p>
-            </div>
-            {found > 0 ? (
-              <button className="dw-btn-ink" onClick={onViewResults}>
-                Review partial results
-                <ArrowRightIcon size={14} />
-              </button>
-            ) : (
-              <button className="dw-btn-outline" onClick={clearScan}>
-                Back to sources
-              </button>
-            )}
-          </div>
-        )}
+          ) : (
+            <button className="dw-btn-outline" onClick={() => void pause()}>
+              <PauseIcon size={15} />
+              Pause
+            </button>
+          )}
+          <button
+            className="dw-btn-outline dw-danger"
+            onClick={() =>
+              openConfirm({
+                title: "Stop searching for lost data?",
+                body: (
+                  <>
+                    Files already found stay available for recovery, but anything not yet scanned
+                    will not be found by this run. Stopping is safe — nothing is half-written.
+                  </>
+                ),
+                confirmLabel: "Stop scan",
+                cancelLabel: "Keep scanning",
+                tone: "warn",
+                onConfirm: () => void stop(),
+              })
+            }
+          >
+            <StopIcon size={14} />
+            Stop
+          </button>
+        </div>
+        <TipCarousel />
+        <div className="dw-scan-controls-right">
+          {app.scanDeep && phase === "quick" && (
+            <button className="dw-btn-ghost" onClick={() => setStage("results")}>
+              <EyeIcon size={15} />
+              Peek at results
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function formatElapsed(secs: number): string {
-  if (secs < 60) return `${Math.floor(secs)}s`;
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  return `${m}m ${String(s).padStart(2, "0")}s`;
+/* Small local helper kept next to its only consumer. */
+export function scanViewFooterHint(): string {
+  return "Scanning is read-only. Recovered files are always written to a different drive you pick.";
 }

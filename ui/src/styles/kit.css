@@ -1,0 +1,313 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Component-kit styles — the primitives shared by every view (revamp).
+ * base.css keeps the button/chip/input/card layer; this file owns the
+ * newer composed primitives: capacity bar, type icon, recoverability
+ * badge, switch, segmented control, empty state, confirm dialog.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── CapacityBar ───────────────────────────────────────────────────────── */
+
+.dw-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+  max-width: 100%;
+}
+.dw-cap-track {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+.dw-cap-used {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--ink);
+  transition: width var(--dur-base) var(--ease-out);
+}
+.dw-cap-unknown {
+  height: 100%;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--track) 0 6px,
+    transparent 6px 12px
+  );
+}
+.dw-cap-labels {
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── TypeIcon ──────────────────────────────────────────────────────────── */
+
+.dw-type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 22.5%;
+  background: color-mix(in oklab, var(--cat, var(--cat-other)) 16%, transparent);
+  color: var(--cat, var(--cat-other));
+  border: 1px solid color-mix(in oklab, var(--cat, var(--cat-other)) 26%, transparent);
+}
+.dw-type-icon[data-cat="photos"] { --cat: var(--cat-photos); }
+.dw-type-icon[data-cat="videos"] { --cat: var(--cat-videos); }
+.dw-type-icon[data-cat="audio"] { --cat: var(--cat-audio); }
+.dw-type-icon[data-cat="documents"] { --cat: var(--cat-documents); }
+.dw-type-icon[data-cat="archives"] { --cat: var(--cat-archives); }
+.dw-type-icon[data-cat="email"] { --cat: var(--cat-email); }
+.dw-type-icon[data-cat="code"] { --cat: var(--cat-code); }
+.dw-type-icon[data-cat="other"] { --cat: var(--cat-other); }
+
+/* ── RecoverabilityBadge ───────────────────────────────────────────────── */
+
+.dw-rec-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border-radius: 999px;
+  background: var(--rec-soft, transparent);
+  color: var(--rec, var(--text-secondary));
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.dw-rec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--rec, currentColor);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--rec, currentColor) 18%, transparent);
+}
+
+/* ── Switch ────────────────────────────────────────────────────────────── */
+
+.dw-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  user-select: none;
+}
+.dw-switch.dw-disabled {
+  opacity: var(--disabled-opacity);
+  pointer-events: none;
+}
+.dw-switch-track {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--control-border);
+  background: var(--track);
+  padding: 0;
+  cursor: default;
+  transition:
+    background var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out);
+}
+.dw-switch-track[aria-checked="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.dw-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: var(--shadow-1);
+  transition: transform var(--dur-base) var(--ease-overshoot);
+}
+.dw-switch-track[aria-checked="true"] .dw-switch-thumb {
+  transform: translateX(16px);
+}
+.dw-switch-track:focus-visible {
+  outline: var(--focus-w) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+.dw-switch-label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* ── SegmentedControl ──────────────────────────────────────────────────── */
+
+.dw-seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--radius-s);
+  background: var(--chip);
+  border: 1px solid var(--divider);
+}
+.dw-seg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: calc(var(--radius-s) - 2px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: default;
+  transition:
+    background var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out);
+}
+.dw-seg-item:hover {
+  color: var(--text);
+}
+.dw-seg-item.dw-active {
+  background: var(--card);
+  color: var(--ink-strong);
+  box-shadow: var(--shadow-1);
+}
+.dw-seg-item:focus-visible {
+  outline: var(--focus-w) solid var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── EmptyState ────────────────────────────────────────────────────────── */
+
+.dw-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 56px 24px;
+  text-align: center;
+  animation: dw-fade-in var(--dur-base) var(--ease-out);
+}
+.dw-empty.dw-compact {
+  padding: 28px 16px;
+  gap: 7px;
+}
+.dw-empty-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: var(--text-tertiary);
+  border: 1px solid var(--divider);
+}
+.dw-empty.dw-compact .dw-empty-glyph {
+  width: 48px;
+  height: 48px;
+}
+.dw-empty h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.dw-empty-body {
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.dw-empty-body ol,
+.dw-empty-body ul {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  text-align: left;
+  display: inline-block;
+}
+.dw-empty-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+/* ── ConfirmDialog (the DrwMessageBox pattern) ─────────────────────────── */
+
+.dw-dialog-scrim {
+  z-index: 300;
+}
+.dw-confirm {
+  width: min(440px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: dw-pop-in var(--dur-fast) var(--ease-out);
+}
+.dw-confirm-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 999px;
+}
+.dw-confirm-icon.dw-tone-danger {
+  background: var(--used-soft);
+  color: var(--used);
+}
+.dw-confirm-icon.dw-tone-warn {
+  background: var(--rec-poor-soft);
+  color: var(--rec-poor);
+}
+.dw-confirm-icon.dw-tone-ok {
+  background: var(--rec-excellent-soft);
+  color: var(--rec-excellent);
+}
+.dw-confirm-icon.dw-tone-info,
+.dw-confirm-icon.dw-tone-error {
+  background: var(--ink-soft);
+  color: var(--ink);
+}
+.dw-confirm h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--text);
+}
+.dw-confirm-body {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+.dw-confirm-body b,
+.dw-confirm-body strong {
+  color: var(--text);
+}
+.dw-confirm-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: default;
+}
+.dw-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}
+.dw-btn-ink.dw-danger {
+  background: linear-gradient(180deg, #ff5b52 0%, #e5342a 60%, #c92a21 100%);
+  border-color: transparent;
+  color: #fff;
+}
+.dw-btn-ink.dw-danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+}

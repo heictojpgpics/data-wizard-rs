@@ -1,45 +1,45 @@
 /**
- * Toast — one ephemeral feedback bubble. The parent mounts one
- * instance per toast (keyed by id); the instance owns its lifecycle:
- * after the dwell it flips its closing flag, then asks the store to
- * drop the toast after the exit fade. All setState calls happen
- * inside timeout callbacks (async), never synchronously in effects.
+ * Toasts — the notification stack (EaseUS notify-center role, docked
+ * bottom-right). Multi-toast, auto-dismiss, enter/exit motion.
  */
-import { useEffect, useRef, useState } from "react";
-import { CheckIcon, CircleXIcon, InfoIcon } from "../lib/Icon";
-import { useAppStore } from "../state/app";
 
-const DWELL_MS = 4200;
-const EXIT_MS = 180;
+import { AlertTriangleIcon, CircleCheckIcon, CircleXIcon, InfoIcon, XIcon } from "../lib/Icon";
+import { useUiStore, type Toast } from "../state/ui";
+
+function ToastCard({ t }: { t: Toast }) {
+  const drop = useUiStore((s) => s.beginCloseToast);
+  const Icon =
+    t.kind === "ok"
+      ? CircleCheckIcon
+      : t.kind === "err"
+        ? CircleXIcon
+        : t.kind === "warn"
+          ? AlertTriangleIcon
+          : InfoIcon;
+  return (
+    <div className={`dw-toast dw-toast-${t.kind}${t.closing ? " dw-closing" : ""}`} role="status">
+      <span className="dw-toast-icon" aria-hidden>
+        <Icon size={16} />
+      </span>
+      <span className="dw-toast-body">
+        <span className="dw-toast-title">{t.title}</span>
+        {t.body && <span className="dw-toast-text">{t.body}</span>}
+      </span>
+      <button className="dw-toast-x" aria-label="Dismiss" onClick={() => drop(t.id)}>
+        <XIcon size={12} />
+      </button>
+    </div>
+  );
+}
 
 export function Toasts() {
-  const toast = useAppStore((s) => s.toast);
-  const setToast = useAppStore((s) => s.setToast);
-  const [closing, setClosing] = useState(false);
-  const timer = useRef<number | null>(null);
-
-  useEffect(() => {
-    timer.current = window.setTimeout(() => {
-      // Phase 1: flip the closing attribute (the CSS fade-out runs).
-      setClosing(true);
-      // Phase 2: drop the toast after the exit transition.
-      timer.current = window.setTimeout(() => setToast(null), EXIT_MS);
-    }, DWELL_MS);
-    return () => {
-      if (timer.current !== null) window.clearTimeout(timer.current);
-    };
-  }, [setToast]);
-
-  if (!toast) return null;
-
+  const toasts = useUiStore((s) => s.toasts);
+  if (toasts.length === 0) return null;
   return (
-    <div className={`dw-toast-zone${closing ? " dw-closing" : ""}`} role="status">
-      <div className={`dw-toast dw-${toast.kind}`}>
-        <span className="dw-toast-icon">
-          {toast.kind === "ok" ? <CheckIcon size={14} /> : toast.kind === "err" ? <CircleXIcon size={14} /> : <InfoIcon size={14} />}
-        </span>
-        <span className="dw-toast-text dw-selectable-text">{toast.text}</span>
-      </div>
+    <div className="dw-toasts" aria-live="polite">
+      {toasts.map((t) => (
+        <ToastCard key={t.id} t={t} />
+      ))}
     </div>
   );
 }

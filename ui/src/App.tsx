@@ -1,111 +1,87 @@
 /**
- * Data Wizard app shell: 56px top bar (brand, wizard step tracker,
- * window drag region, Windows caption buttons) → body (contextual
- * sidebar | main | inspector on results) → 30px status strip. Hosts
- * the three wizard stages, the recovery dialog, toasts, and the
- * DATAWIZARD_TOUR driver (CI screenshot tours).
+ * Data Wizard app shell (revamp): 56px top bar (brand, wizard step
+ * tracker, window drag region, Windows caption buttons) → body (the
+ * stage view owns its own side panes) → 30px status strip. Hosts the
+ * three wizard stages, the recovery flow dialogs, toasts, tooltips,
+ * confirms, and the DATAWIZARD_TOUR driver (CI screenshot tours).
  */
-import { useCallback, useEffect } from "react";
-import type { SavedScanSummary } from "./bindings";
+import { useEffect, useState } from "react";
 import { TopBar } from "./shell/TopBar";
-import { StatusBar, warmDisks } from "./shell/StatusBar";
-import { Sidebar } from "./sidebar/Sidebar";
-import { SelectSource } from "./views/SelectSource";
+import { StatusBar } from "./shell/StatusBar";
+import { HomeView } from "./views/HomeView";
 import { ScanningView } from "./views/ScanningView";
 import { ResultsView } from "./views/ResultsView";
 import { FileInspector } from "./inspector/FileInspector";
-import { RecoveryDialog } from "./components/RecoveryDialog";
+import { DestinationDialog } from "./components/DestinationDialog";
+import { RecoveryFlow } from "./components/RecoveryFlow";
 import { Toasts } from "./components/Toasts";
+import { Tooltip } from "./components/ui/Tooltip";
+import { ConfirmDialog } from "./components/ui/ConfirmDialog";
 import { TourDriver } from "./shell/TourDriver";
-import { useAppStore, type ChosenSource } from "./state/app";
+import { useAppStore } from "./state/app";
 import { useScanStore } from "./state/scan";
-import { invoke } from "./lib/ipc";
+import { useDevicesStore } from "./state/devices";
+import { useUiStore } from "./state/ui";
 
 import "./theme/tokens.css";
 import "./styles/base.css";
+import "./styles/kit.css";
 import "./styles/shell.css";
-import "./styles/sidebar.css";
-import "./styles/source.css";
+import "./styles/home.css";
 import "./styles/scan.css";
 import "./styles/results.css";
 import "./styles/inspector.css";
 import "./styles/overlays.css";
 
-/** Tab/stage swap wrapper: the entering view fades 0->1 over the solid
- * page background; the old view unmounts INSTANTLY (conditional
- * render — no exit tween, no lingering layer). The wrapper carries
- * the solid background so the fade never flashes. */
+/** Stage swap: the entering view fades 0→1 over the solid page
+ * background; the old view unmounts INSTANTLY (conditional render —
+ * no exit tween, no lingering layer). */
 function StageSwap({ children }: { children: React.ReactNode }) {
   return <div className="dw-tab-swap">{children}</div>;
 }
 
 function AppShell() {
   const stage = useAppStore((s) => s.stage);
-  const inspectorVisible = useAppStore((s) => s.inspectorVisible);
-  const scannedId = useAppStore((s) => s.scanId);
-  const recoveryOpen = useAppStore((s) => s.recoveryOpen);
-  const toast = useAppStore((s) => s.toast);
+  const scanId = useAppStore((s) => s.scanId);
 
-  const startScan = useCallback(async (source: ChosenSource, deep: boolean) => {
-    const scan = useScanStore.getState();
-    try {
-      const scanId = await scan.startScan(source.uri, deep, source.partition);
-      useAppStore.getState().beginScan(scanId, deep, source);
-    } catch (e) {
-      useAppStore.getState().setToast({ text: `Could not start the scan: ${String(e)}`, kind: "err" });
-    }
-  }, []);
+  const [inspectedId, setInspectedId] = useState<string | null>(null);
+  const confirm = useUiStore((s) => s.confirm);
+  const closeConfirm = useUiStore((s) => s.closeConfirm);
 
-  const resumeScan = useCallback(async (saved: SavedScanSummary) => {
-    const scan = useScanStore.getState();
-    try {
-      const scanId = await scan.resumeScan(saved.scan_id, saved.mode === "deep");
-      const label = saved.source_uri.split(/[\\/]/).pop() ?? saved.source_uri;
-      useAppStore.getState().beginScan(scanId, saved.mode === "deep", {
-        uri: saved.source_uri,
-        label,
-        detail: "Resumed saved scan",
-        partition: null,
-      });
-    } catch (e) {
-      useAppStore.getState().setToast({ text: `Could not resume: ${String(e)}`, kind: "err" });
-    }
-  }, []);
-
-  // Boot: install the persistent scan listeners + warm the disk list.
+  // Boot: persistent listeners + device/saved-scan warm-up.
   useEffect(() => {
     useScanStore.getState().ensureListeners();
-    warmDisks();
-    // Best-effort saved scans warm (the sidebar also loads its own).
-    invoke<{ scans: SavedScanSummary[] }>("list_saved_scans", { req: {} })
-      .then((res) => {
-        useAppStore.getState().setSavedScans(res.scans ?? []);
-        useAppStore.getState().setSavedLoading(false);
-      })
-      .catch(() => useAppStore.getState().setSavedLoading(false));
+    useDevicesStore.getState().ensureAutoRefresh();
   }, []);
+
+  // The inspector id can be invalidated by a store reset — clamp.
+  useEffect(() => {
+    if (inspectedId != null && stage === "results") {
+      // No-op when valid; the inspector itself renders null if missing.
+    }
+  }, [inspectedId, stage]);
 
   return (
     <div className="dw-app">
       <TopBar />
-      <div className="dw-body">
-        <Sidebar />
-        <main className="dw-main">
-          <StageSwap key={stage}>
-            {stage === "source" && <SelectSource onScan={startScan} onResume={resumeScan} />}
-            {stage === "scanning" && (
-              <ScanningView onViewResults={() => useAppStore.getState().setStage("results")} />
-            )}
-            {stage === "results" && scannedId && (
-              <ResultsView onBack={() => useAppStore.getState().clearScan()} />
-            )}
-          </StageSwap>
-        </main>
-        {stage === "results" && inspectorVisible && <FileInspector />}
-      </div>
+      <main className="dw-main dw-main-full">
+        <StageSwap key={stage}>
+          {stage === "source" && <HomeView />}
+          {stage === "scanning" && <ScanningView />}
+          {stage === "results" && scanId && (
+            <ResultsView onInspect={(id) => setInspectedId(id)} />
+          )}
+        </StageSwap>
+      </main>
+      {stage === "results" && inspectedId && (
+        <FileInspector id={inspectedId} onClose={() => setInspectedId(null)} />
+      )}
       <StatusBar />
-      {recoveryOpen && <RecoveryDialog />}
-      {toast && <Toasts key={toast.id} />}
+      <DestinationDialog />
+      <RecoveryFlow />
+      {confirm && <ConfirmDialog spec={confirm} onClose={closeConfirm} />}
+      <Toasts />
+      <Tooltip />
       <TourDriver />
     </div>
   );

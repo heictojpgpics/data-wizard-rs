@@ -562,3 +562,150 @@ a:hover {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ═════════════════════════════════════════════════════════════════════
+ * Revamp additions — the EaseUS-parity feedback layer.
+ * ═════════════════════════════════════════════════════════════════════ */
+
+/* Tabular figures: every counter, byte value and clock in the app uses
+ * fixed-width digits so live updates never jitter the layout. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Count-pop: tree nodes + chips bounce their count when it grows. */
+@keyframes dw-count-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.dw-count-pop {
+  animation: dw-count-pop var(--dur-base) var(--ease-overshoot);
+}
+
+/* Odometer: the animated number renderer. Digits ride a vertical rail;
+ * the wrapper crops to one line. Heights are em-based so any font size
+ * inherits cleanly. */
+.dw-odo {
+  display: inline-flex;
+  align-items: baseline;
+  overflow: hidden;
+  line-height: 1;
+  vertical-align: bottom;
+}
+.dw-odo-digit {
+  display: inline-block;
+  position: relative;
+  height: 1em;
+  width: 1ch;
+  overflow: hidden;
+}
+.dw-odo-rail {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  transition: transform var(--dur-slow) var(--ease-overshoot);
+}
+.dw-odo-rail > span {
+  height: 1em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Tooltip primitive: delayed, token-driven, pointer-events none. */
+.dw-tip {
+  position: fixed;
+  z-index: 260;
+  max-width: 280px;
+  padding: 6px 10px;
+  border-radius: var(--radius-s);
+  background: var(--text);
+  color: var(--background);
+  font-size: 12px;
+  line-height: 1.45;
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+.dw-tip.dw-open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Menu/flyout surface (shared by context menus, sort menus, group-by,
+ * the filter presets menu and the troubleshooting flyout). */
+.dw-menu {
+  min-width: 180px;
+  padding: 5px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-pop);
+  animation: dw-pop-in var(--dur-fast) var(--ease-out);
+}
+.dw-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: default;
+}
+.dw-menu-item:hover:not(:disabled),
+.dw-menu-item:focus-visible:not(:disabled) {
+  background: var(--control-hover);
+  outline: none;
+}
+.dw-menu-item.dw-danger {
+  color: var(--used);
+}
+.dw-menu-item.dw-danger:hover:not(:disabled) {
+  background: var(--used-soft);
+}
+.dw-menu-item[aria-checked="true"] {
+  background: var(--ink-soft);
+  color: var(--ink-strong);
+  font-weight: 600;
+}
+.dw-menu-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--divider);
+}
+.dw-menu-label {
+  padding: 7px 10px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* Kbd-style shortcut hint inside menus. */
+.dw-kbd {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+}
