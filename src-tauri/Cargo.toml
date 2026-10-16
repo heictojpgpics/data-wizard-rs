@@ -20,6 +20,7 @@ dw-ext        = { path = "../crates/dw-ext" }
 dw-hfs        = { path = "../crates/dw-hfs" }
 dw-btrfs      = { path = "../crates/dw-btrfs" }
 dw-zfs        = { path = "../crates/dw-zfs" }
+dw-refs       = { path = "../crates/dw-refs" }
 dw-signatures = { path = "../crates/dw-signatures" }
 dw-carver     = { path = "../crates/dw-carver" }
 dw-ipc        = { path = "../crates/dw-ipc" }
@@ -104,6 +105,7 @@ dw-ext         = { workspace = true }
 dw-hfs         = { workspace = true }
 dw-btrfs     = { workspace = true }
 dw-zfs       = { workspace = true }
+dw-refs      = { workspace = true }
 dw-signatures  = { workspace = true }
 dw-carver      = { workspace = true }
 tauri          = { workspace = true }
