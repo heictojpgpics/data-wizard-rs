@@ -75,7 +75,23 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $vhd = "$env:TEMP\test_refs.vhd"
-          "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart | Out-Null
+          $det = "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart
+          $det | Out-String | Write-Host
+          if ($LASTEXITCODE -ne 0) { throw "detach failed: $LASTEXITCODE" }
+          # VDS releases the handle asynchronously; give it a moment.
+          $ok = $false
+          foreach ($i in 1..6) {
+            Start-Sleep -Seconds 5
+            try {
+              $fs = [IO.File]::Open($vhd, 'Open', 'Read', 'None')
+              $fs.Close()
+              $ok = $true
+              break
+            } catch [IO.IOException] {
+              Write-Host "vhd still held (attempt $i): $($_.Exception.Message)"
+            }
+          }
+          if (-not $ok) { throw "vhd still attached after 30s" }
           $info = Get-Item $vhd
           Write-Host "VHD: $($info.FullName) $([math]::Round($info.Length / 1MB, 2)) MiB"
           Compress-Archive -Path $vhd -DestinationPath refs-sample.zip
