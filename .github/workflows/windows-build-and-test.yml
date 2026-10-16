@@ -214,7 +214,7 @@ jobs:
           $key = Get-ChildItem "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
                                 "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" -ErrorAction SilentlyContinue |
             Get-ItemProperty | Where-Object { $_.DisplayName -like "*Data Wizard*" } | Select-Object -First 1
-          $loc = if ($key -and $key.InstallLocation) { $key.InstallLocation } else { Join-Path $env:LOCALAPPDATA "Data Wizard" }
+          $loc = if ($key -and $key.InstallLocation) { $key.InstallLocation.Trim('"') } else { Join-Path $env:LOCALAPPDATA "Data Wizard" }
           Write-Host "Installed to: $loc"
           $exe = Join-Path $loc "dw-tauri.exe"
           if (-not (Test-Path $exe)) { throw "installed exe missing at $exe (locate the NSIS per-user dir)" }
@@ -391,22 +391,31 @@ jobs:
           $exe = Join-Path $pkg.InstallLocation "dw-tauri.exe"
           if (-not (Test-Path $exe)) { throw "MSIX install dir missing dw-tauri.exe" }
 
-          # Launch smoke from inside the package: same 10-second stay-up
-          # contract as the MSI/NSIS jobs, so a startup panic is caught no
-          # matter which distribution channel delivered the binary.
-          $so = "$env:TEMP\app-msix-stdout.txt"
-          $se = "$env:TEMP\app-msix-stderr.txt"
-          $app = Start-Process $exe -PassThru -RedirectStandardOutput $so -RedirectStandardError $se
+          # Launch smoke via the canonical package activation
+          # (shell:AppsFolder). Direct exe launch from WindowsApps is
+          # blocked/ill-defined for packaged apps; activation gives the
+          # process its package identity. stdout/stderr cannot be
+          # redirected through the activation manager, so liveness is
+          # asserted on the dw-tauri process itself.
+          $pf = $pkg.PackageFamilyName
+          Write-Host "Activating shell:AppsFolder/$pf!DataWizard"
+          Start-Process "shell:AppsFolder/$pf!DataWizard"
+          $deadline = (Get-Date).AddSeconds(15)
+          $app = $null
+          while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $app = Get-Process dw-tauri -ErrorAction SilentlyContinue
+            if ($app) { break }
+          }
+          if (-not $app) { throw "app did not start within 15s of activation" }
           Start-Sleep -Seconds 10
+          $app.Refresh()
           if ($app.HasExited) {
-            Write-Host "=== app stdout ==="
-            Get-Content $so -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
-            Write-Host "=== app stderr ==="
-            Get-Content $se -ErrorAction SilentlyContinue | Select-Object -Last 40 | ForEach-Object { Write-Host $_ }
-            throw "app exited immediately (code $($app.ExitCode))"
+            throw "app exited after activation (code $($app.ExitCode))"
           }
           Stop-Process -Id $app.Id -Force
           Start-Sleep -Seconds 2
+          $app.Refresh()
           if (-not $app.HasExited) { throw "app did not stop after Stop-Process" }
           Write-Host "MSIX launch smoke passed"
 
