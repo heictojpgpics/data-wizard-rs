@@ -237,7 +237,8 @@ fn parse_fatzap(
 }
 
 /// Parse one zap leaf; returns the number of entries found.
-fn parse_leaf(leaf: &[u8], out: &mut Vec<(String, ZapValue)>, objid: u64) -> ZfsResult<usize> {
+/// Public for the fuzz targets (pure function over a block).
+pub fn parse_leaf(leaf: &[u8], out: &mut Vec<(String, ZapValue)>, objid: u64) -> ZfsResult<usize> {
     // Leaf layout: 48-B header, hash table, chunks.
     const HDR: usize = 48;
     if leaf.len() < HDR {

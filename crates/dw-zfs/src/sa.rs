@@ -51,6 +51,15 @@ pub struct SaState {
 }
 
 impl SaState {
+    /// An empty registry (no layouts): legacy-znode parsing only.
+    /// Public for the fuzz targets.
+    pub fn empty() -> SaState {
+        SaState {
+            attrs: HashMap::new(),
+            layouts: HashMap::new(),
+        }
+    }
+
     /// Load the registry from the objset's master node.
     pub fn load(dmu: &mut Dmu, table: &mut ObjectTable, os: &Objset) -> ZfsResult<SaState> {
         let master = zap::read_zap(dmu, table, os, MASTER_NODE_OBJ)?;

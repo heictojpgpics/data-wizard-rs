@@ -52,6 +52,14 @@ jobs:
             target: fuzz_superblock
           - crate: dw-btrfs
             target: fuzz_items
+          - crate: dw-zfs
+            target: fuzz_nvlist
+          - crate: dw-zfs
+            target: fuzz_zap_leaf
+          - crate: dw-zfs
+            target: fuzz_sa_bonus
+          - crate: dw-zfs
+            target: fuzz_compress
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@nightly

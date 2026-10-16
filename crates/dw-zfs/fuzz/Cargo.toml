@@ -1,0 +1,38 @@
+[package]
+name = "dw-zfs-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dw-zfs = { path = ".." }
+
+[[bin]]
+name = "fuzz_nvlist"
+path = "fuzz_targets/fuzz_nvlist.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_zap_leaf"
+path = "fuzz_targets/fuzz_zap_leaf.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_sa_bonus"
+path = "fuzz_targets/fuzz_sa_bonus.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "fuzz_compress"
+path = "fuzz_targets/fuzz_compress.rs"
+test = false
+doc = false
+
+[workspace]
