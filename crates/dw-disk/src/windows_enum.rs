@@ -471,7 +471,7 @@ fn storage_device_descriptor(handle: HANDLE) -> Option<DeviceDescriptor> {
 fn bus_from_storage_bus_type(v: u32) -> StorageBus {
     match v {
         0 => StorageBus::Unknown,
-        1..=3 => StorageBus::Ata,  // Scsi, Atapi, Ata
+        1..=3 => StorageBus::Ata,      // Scsi, Atapi, Ata
         4 => StorageBus::FireWire,     // 1394
         5 => StorageBus::FibreChannel, // SSA treated as FC family
         6 => StorageBus::FibreChannel,
