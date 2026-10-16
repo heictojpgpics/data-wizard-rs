@@ -135,3 +135,40 @@ file population, launches with `DATAWIZARD_TOUR=1` +
 through the title-sync channel (`Data Wizard · tNN-name`, stamped by
 the TourDriver). The same tour runs in the browser mock via `?tour=1`
 for agent-driven visual validation.
+
+## The revamp layer (EaseUS-parity, 2026-10)
+
+The full spec derivation lives in `research/easeus/` (reverse-engineered
+from the reference product). The revamp keeps the calm-studio language
+and adds the parity mechanics:
+
+**Domain stores** (single-owner state, the DiskGenie lesson): `devices`
+(inventory + saved scans + focus re-warm), `scan` (phase machine incl.
+the quick→deep interstitial, pause, ETA, the 350ms live-results pump),
+`results` (full in-memory set; `byId`/`childFiles`/`childDirs`/`subtree`
+indexes; category/special-group/status/date counters — all copy-on-write
+so zustand selectors stay live; the filter/sort/group/browse engine),
+`recovery` (destination validation + per-file stream), `ui` (toasts,
+confirms). `app` is deliberately thin: the stage machine + scan identity.
+
+**The results grammar**: left tree (source root, Deleted/Existing/Lost/
+Recycle special groups, 8-type rail, folders-here), toolbar (history
+back/forward, breadcrumb, debounced search, filter badge, list/grid,
+group-by, sort), virtualized table + thumbnail grid, filter drawer
+(types with counts, EaseUS size/date boundaries, extension query,
+clutter toggles), selection bar. Recoverability is a 4-step verdict
+(Excellent/Good/Poor/Overwritten) derived from status + confidence.
+
+**Motion**: odometer digits on rail transitions, count-pop on growing
+counters, shimmer on active progress, staggered row-in on the live feed,
+pop-in dialogs — all collapsed under `prefers-reduced-motion`.
+
+**Pause**: `PausableSource` (dw-disk) gates both the sync `ReadAt` view
+and the async path on a shared `AtomicBool`; `set_scan_paused` flips it.
+Zero engine changes — the whole pipeline stalls in place.
+
+**Agent channels**: `?tour=1` browser tours (TourDriver steps: home ×3,
+themes ×5, mid-scan, results ×8, recovery ×2 — title-stamped `tNN-*`);
+`window.__DW_STORES__` (DEV/browser mock only) exposes the live stores
+for scripted validation; `window.__DW_MOCK__.finishScan()` fast-forwards
+the synthetic scan.

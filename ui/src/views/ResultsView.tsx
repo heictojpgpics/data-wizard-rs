@@ -50,6 +50,10 @@ export function ResultsView({ onInspect }: { onInspect: (id: string) => void }) 
     () => rows.reduce((n, r) => (r.kind === "file" ? n + 1 : n), 0),
     [rows],
   );
+  /* Path view: directory rows count as content — a folder full of
+   * subfolders is NOT empty (the VLM pass caught the root showing the
+   * empty state while its subfolders sat unrendered). */
+  const hasContent = rows.length > 0;
   const sel = useMemo(() => selectionSummary(selected, byId), [selected, byId]);
 
   const scanning = scanPhase === "quick" || scanPhase === "deep" || scanPhase === "probing";
@@ -141,7 +145,7 @@ export function ResultsView({ onInspect }: { onInspect: (id: string) => void }) 
                 </button>
               }
             />
-          ) : fileCount === 0 && location.view === "path" ? (
+          ) : fileCount === 0 && !hasContent && location.view === "path" ? (
             <EmptyState
               icon={<ClockIcon size={26} />}
               title="This folder is empty"

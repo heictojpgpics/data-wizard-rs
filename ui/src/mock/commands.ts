@@ -450,4 +450,21 @@ export function installMock(): void {
     /** Category extension lists (parity check helper). */
     extensionsOf: (c: CategoryId) => extensionsOf(c),
   };
+
+  // Agent-debug channel: live store snapshots (DEV/browser only).
+  void Promise.all([
+    import("../state/app"),
+    import("../state/scan"),
+    import("../state/results"),
+    import("../state/devices"),
+    import("../state/recovery"),
+  ]).then(([app, scan, results, devices, recovery]) => {
+    (window as unknown as Record<string, unknown>).__DW_STORES__ = {
+      app: app.useAppStore,
+      scan: scan.useScanStore,
+      results: results.useResultsStore,
+      devices: devices.useDevicesStore,
+      recovery: recovery.useRecoveryStore,
+    };
+  });
 }
