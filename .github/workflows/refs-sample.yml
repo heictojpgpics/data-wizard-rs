@@ -88,8 +88,21 @@ jobs:
           }
           Write-Host "volume length: $len"
 
+          # Exact zero check in C#: a PowerShell byte loop over 2 GiB never
+          # finishes and sampled checks miss data between samples.
+          Add-Type -TypeDefinition @"
+          public static class ZChk {
+            public static unsafe bool IsZero(byte[] b, int off, int len) {
+              fixed (byte* p = &b[off]) {
+                ulong* q = (ulong*)p;
+                for (int i = 0; i < len / 8; i++) { if (q[i] != 0UL) return false; }
+                for (int i = len & ~7; i < len; i++) { if (b[off + i] != 0) return false; }
+              }
+              return true;
+            }
+          }
+          "@ -CompilerOptions "/unsafe"
           $out = New-Object IO.FileStream("$env:TEMP\refs-nz.bin", 'Create', 'Write')
-          $zero = New-Object byte[] (4096)
           $buf = New-Object byte[] (4096)
           $count = 0
           for ($off = 0L; $off -lt $len; $off += 4096) {
@@ -101,12 +114,7 @@ jobs:
               $got += $r
             }
             if ($got -lt 4096) { for ($i = $got; $i -lt 4096; $i++) { $buf[$i] = 0 } }
-            $isZero = $true
-            for ($i = 0; $i -lt 4096; $i += 64) {
-              $isZero = $isZero -and ([BitConverter]::ToUInt64($buf, $i) -eq 0UL) -and ([BitConverter]::ToUInt64($buf, [Math]::Min($i + 8, 4088)) -eq 0UL)
-              if (-not $isZero) { break }
-            }
-            if (-not $isZero) {
+            if (-not [ZChk]::IsZero($buf, 0, 4096)) {
               $idx = [BitConverter]::GetBytes([UInt64]($off / 4096))
               $out.Write($idx, 0, 8)
               $out.Write($buf, 0, 4096)
