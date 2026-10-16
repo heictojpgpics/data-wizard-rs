@@ -1,16 +1,37 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!-- Raw disk access (\\.\PhysicalDriveN, \\.\C:) requires an elevated
+       token; every tool in this category (EaseUS Data Recovery,
+       R-Studio, DMDE, Recuva) runs elevated. The NSIS installer and
+       MSIX package inherit this. -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
     <security>
       <requestedPrivileges>
-        <!-- Raw disk access (\\.\PhysicalDriveN, \\.\C:) requires an
-             elevated token; every tool in this category (EaseUS Data
-             Recovery, R-Studio, DMDE, Recuva) runs elevated. The NSIS
-             installer and MSIX package inherit this. -->
         <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>
+
+  <!-- The Common-Controls v6 side-by-side dependency from the
+       tauri-build default manifest MUST survive a custom manifest: the
+       app statically imports v6-only comctl32 exports
+       (TaskDialogIndirect, SetWindowSubclass, ...) — without this
+       dependency the loader resolves comctl32 to the base v5 DLL and
+       the process dies at init with STATUS_ENTRYPOINT_NOT_FOUND
+       (0xC0000139), no stdout, no stderr, both GUI and --diagnostics. -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
       <!-- Windows 10 and 11 -->

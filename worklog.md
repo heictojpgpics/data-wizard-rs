@@ -1136,3 +1136,35 @@ Stage Summary:
   the topbar drags the window, themes sync the native chrome, and the
   tour's title stamps reach MainWindowTitle for the one-frame-per-step
   capture.
+
+---
+Task ID: 6 (session 8, follow-up 3)
+Agent: main (Super Z)
+Task: Fix the 0xC0000139 startup crash introduced by the elevation manifest
+
+Work Log:
+- The rebased pipeline (7dca3ad) failed CI (fmt: upstream's new
+  windows_enum/windows_raw code unformatted — fixed with cargo fmt) and
+  the NSIS smoke + UI Screenshots crashed at process start: exit
+  -1073741511 = 0xC0000139 STATUS_ENTRYPOINT_NOT_FOUND, empty stdout/
+  stderr, GUI and --diagnostics alike.
+- PE-level bisect against the last good exe (934660d's windows-bin
+  artifact): static + delay import tables IDENTICAL; the only
+  difference is the embedded custom app.manifest from dd5f1c0.
+- ROOT CAUSE: the custom manifest (requireAdministrator) dropped the
+  Microsoft.Windows.Common-Controls v6 side-by-side dependency that
+  ships in the tauri-build DEFAULT manifest. The exe statically
+  imports v6-only comctl32 exports (TaskDialogIndirect,
+  SetWindowSubclass/RemoveWindowSubclass/DefSubclassProc — verified
+  with llvm-readobj on both exes); without the SxS dependency the
+  loader binds comctl32 to the base v5 DLL, the entry points do not
+  resolve, and the process dies at init — before main(), hence the
+  empty logs.
+- FIX: app.manifest now carries the Common-Controls v6 dependency
+  (plus the original trustInfo/compatibility/UTF-8 sections), with the
+  failure mode documented in-place so the next custom-manifest edit
+  keeps it.
+
+Stage Summary:
+- The elevation feature survives; the crash class is documented;
+  awaiting the runners to confirm the full pipeline green.
