@@ -795,3 +795,49 @@ Stage Summary:
   the full artifact chain (MSI/NSIS/MSIX/portable + installer tests)
 - Pending at write time: Build and Test green on the final commit,
   manual verification dispatch, data-wizard-ci deletion, main merge
+
+---
+Task ID: 7
+Agent: main (session 7, continued)
+Task: app launch crash fix, workflow split, ZFS engine, ReFS groundwork
+
+Work Log:
+- Verified with the run logs: the MSI launch smoke panicked at
+  main.rs:54 with PluginInitialization("log", ...) exit 101 - our
+  tracing init installs the log-crate bridge (tracing-subscriber's
+  default tracing-log feature), so tauri_plugin_log's second
+  installation failed. Removed the plugin, its Cargo entries, and the
+  log:default capability; log-crate records forward into tracing.
+  Confirmed green on CI: "MSI install/launch/uninstall: PASS".
+- Split the monolithic Build and Test job into build / installers
+  (MSI + NSIS silent-install smokes) / msix (package + install +
+  activation + removal) so channels test in parallel; dropped fmt and
+  UI lint/typecheck from it (the CI workflow already gates every
+  push); kept Windows clippy + tests (cfg(windows) cannot be covered
+  from Linux). Fixed the NSIS quoted-InstallLocation breakage and the
+  MSIX launch (shell:AppsFolder activation + Get-Process liveness;
+  direct exe launch from WindowsApps is blocked by design).
+- dw-zfs: full OpenZFS on-disk engine. Every constant extracted from
+  the OpenZFS headers/sources (label geometry, uberblock, blkptr/DVA
+  bitfields, dnode/objset, zap micro/fat, SA registry/layouts, XDR
+  nvlists; compression incl. the LZ4 4-byte BE header; fletcher2/4,
+  SHA-256). Quick pass walks the newest uberblock's tree; deep pass
+  walks the previous-uberblock generation (recently deleted entries
+  keep names/timestamps/extents). Single-device scope with honest
+  fallback; 33 unit + 8 integration tests over a synthetic
+  two-generation pool; fixture-driven debugging caught three real
+  parser bugs (zio_eck cksum offset, XDR string padding, fatzap
+  value-numints semantics).
+- ReFS: no mainline or linux-next ReFS driver exists (checked both
+  trees; the "merged driver" recollection was wrong - recorded here
+  so no future agent repeats it). Grounded path chosen instead:
+  refs-sample.yml formats a REAL ReFS volume on CI (known files,
+  timestamps, deletions) and uploads it; the engine will be validated
+  empirically against it like the HFS+ engine was against the real
+  DMG. README matrix updated (ZFS row shipped, ReFS honestly pending).
+
+Stage Summary:
+- 333 tests passing, fmt/clippy clean across the workspace
+- Pipelines running on the combined push; pending at write time:
+  Build and Test (build/installers/msix) green, ReFS sample artifact
+  for local layout analysis
