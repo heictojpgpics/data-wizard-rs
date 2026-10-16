@@ -79,37 +79,37 @@ jobs:
           # of the attached volume itself: \.\R: first 128 MiB plus the
           # last 2 MiB, with a manifest carrying the volume length.
           $vol = New-Object IO.FileStream("\\.\R:", 'Open', 'Read', [IO.FileShare]::ReadWrite)
-          $len = $vol.Length
-          $head = 128MB
-          $tail = 2MB
           $buf = New-Object byte[] (4MB)
-
-          $out = New-Object IO.FileStream("$env:TEMP\refs-head.bin", 'Create', 'Write')
+          $headFs = New-Object IO.FileStream("$env:TEMP\refs-head.bin", 'Create', 'Write')
+          $tail = New-Object System.Collections.Generic.List[byte]
+          $tailCap = [int](2MB)
           $pos = 0L
-          while ($pos -lt $head) {
-            $take = [Math]::Min($buf.Length, $head - $pos)
+          $total = 0L
+          while ($true) {
             $vol.Position = $pos
-            $n = $vol.Read($buf, 0, $take)
-            if ($n -le 0) { throw "short read at $pos" }
-            $out.Write($buf, 0, $n)
+            $n = $vol.Read($buf, 0, $buf.Length)
+            if ($n -le 0) { break }
+            if ($total -lt 128MB) {
+              $take = [Math]::Min($n, [int](128MB - $total))
+              $headFs.Write($buf, 0, $take)
+              if ($n -gt $take) {
+                for ($i = $take; $i -lt $n; $i++) { $tail.Add($buf[$i]) }
+                while ($tail.Count -gt $tailCap) { $tail.RemoveRange(0, $tail.Count - $tailCap) }
+              }
+            } else {
+              for ($i = 0; $i -lt $n; $i++) { $tail.Add($buf[$i]) }
+              while ($tail.Count -gt $tailCap) { $tail.RemoveRange(0, $tail.Count - $tailCap) }
+            }
+            $total += $n
             $pos += $n
+            if ($total -gt 4GB) { break }
           }
-          $out.Close()
-
-          $out = New-Object IO.FileStream("$env:TEMP\refs-tail.bin", 'Create', 'Write')
-          $pos = [Math]::Max(0L, $len - $tail)
-          while ($pos -lt $len) {
-            $take = [Math]::Min($buf.Length, $len - $pos)
-            $vol.Position = $pos
-            $n = $vol.Read($buf, 0, $take)
-            if ($n -le 0) { throw "short read at $pos" }
-            $out.Write($buf, 0, $n)
-            $pos += $n
-          }
-          $out.Close()
+          $headFs.Close()
           $vol.Close()
+          [IO.File]::WriteAllBytes("$env:TEMP\refs-tail.bin", $tail.ToArray())
+          $tail = $null
 
-          @{ volume_bytes = $len; head_bytes = $head; tail_bytes = $tail } |
+          @{ volume_bytes = $total; head_bytes = 128MB; tail_bytes = 2MB } |
             ConvertTo-Json | Set-Content "$env:TEMP\refs-manifest.json"
           Get-Item "$env:TEMP\refs-*.bin" | Select-Object Name, Length | Out-String | Write-Host
 
