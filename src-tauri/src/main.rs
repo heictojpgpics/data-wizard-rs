@@ -25,7 +25,11 @@ fn main() {
     tracing::info!("Data Wizard starting up");
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::new().build())
+        // NOTE: no tauri_plugin_log here. The tracing subscriber installed
+        // above already carries the `log`-crate bridge (tracing-subscriber's
+        // default `tracing-log` feature), so a second log installation would
+        // fail with PluginInitialization("log", ...) and kill the app at
+        // startup. All log-crate records are forwarded into tracing instead.
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .invoke_handler(tauri::generate_handler![

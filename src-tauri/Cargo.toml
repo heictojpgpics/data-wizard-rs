@@ -73,7 +73,6 @@ uuid = { version = "1.18", features = ["v4", "v7", "serde"] }
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
-tauri-plugin-log = "2"
 tauri-plugin-window-state = "2"
 specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"
@@ -107,7 +106,6 @@ dw-signatures  = { workspace = true }
 dw-carver      = { workspace = true }
 tauri          = { workspace = true }
 tauri-plugin-dialog       = { workspace = true }
-tauri-plugin-log          = { workspace = true }
 tauri-plugin-window-state = { workspace = true }
 specta          = { workspace = true, features = ["derive"] }
 tauri-specta    = { workspace = true, features = ["derive", "typescript"] }

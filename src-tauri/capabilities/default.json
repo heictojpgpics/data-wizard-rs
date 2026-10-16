@@ -1,12 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2/capability",
   "identifier": "default",
-  "description": "Minimum capability set: core runtime, folder picker for recovery destinations, logging, window geometry",
+  "description": "Minimum capability set: core runtime, folder picker for recovery destinations, window geometry",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "dialog:default",
-    "log:default",
     "window-state:default"
   ]
 }
