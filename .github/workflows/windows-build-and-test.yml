@@ -12,9 +12,9 @@ name: Build and Test
 
 on:
   push:
-    branches: [main, draft]
+    branches: [main, draft, revamp]
   pull_request:
-    branches: [main, draft]
+    branches: [main, draft, revamp]
   workflow_dispatch:
 
 env:

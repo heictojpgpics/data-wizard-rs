@@ -28,7 +28,7 @@ on:
         required: false
         default: "CN=Data Wizard CI"
   push:
-    branches: [main, draft]
+    branches: [main, draft, revamp]
 
 concurrency:
   group: msix-build-${{ github.ref }}

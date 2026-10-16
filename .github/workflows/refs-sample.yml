@@ -2,7 +2,7 @@ name: ReFS sample builder
 
 on:
   push:
-    branches: [main, draft]
+    branches: [main, draft, revamp]
   workflow_dispatch:
 
 permissions:

@@ -13,7 +13,7 @@ name: UI Screenshots
 on:
   workflow_dispatch:
   push:
-    branches: [main, draft]
+    branches: [main, draft, revamp]
 
 concurrency:
   group: ui-screenshots-${{ github.ref }}
