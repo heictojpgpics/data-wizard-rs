@@ -4,7 +4,7 @@ name: UI Screenshots
 # to the recovery domain): builds the REAL app (release, embedded
 # frontend), stages a synthetic NTFS volume with known deleted files
 # (VHD + diskpart — the same pattern as verification.yml), launches
-# with DATAWIZARD_TOUR=1 + DATAWIZARD_SCAN=\\.\T:, and captures
+# with DATAWIZARD_TOUR=1 + DATAWIZARD_SCAN=<the staged, detached VHD file>, and captures
 # EXACTLY ONE NAMED FRAME PER TOUR STEP via the title-sync channel
 # (the TourDriver stamps `tNN-name` into the window title; the harness
 # polls it, lets the step settle, and shoots). The fixed-cadence
@@ -132,6 +132,12 @@ jobs:
           $kept = (Get-ChildItem "T:\" -Recurse -File | Measure-Object).Count
           "staged $kept surviving entries (the deleted population is what the scan recovers)"
 
+          # Detach so the app scans the VHD FILE (FileBackedSource) —
+          # the same path every green verification run uses; raw
+          # \\.\T: volume opens fail in the runner context.
+          "select vdisk file=`"$vhd`"`ndetach vdisk`nexit" | diskpart | Out-Null
+          Start-Sleep -Seconds 3
+          "vhd detached for file-backed scanning"
       - name: Storage-stack diagnostics pre-check (crash isolation)
         shell: pwsh
         run: |
@@ -164,7 +170,12 @@ jobs:
           }
           $exe = Join-Path $PWD "src-tauri\target\x86_64-pc-windows-msvc\release\dw-tauri.exe"
           if (-not (Test-Path $exe)) { throw "exe not found: $exe" }
-          $env:DATAWIZARD_SCAN = '\\.\T:'
+          $vhd = "$env:TEMP\dw-tour.vhd"
+          if (-not (Test-Path $vhd)) { throw "staged VHD missing: $vhd" }
+          # The tour scans the VHD FILE (FileBackedSource) — the same
+          # path every green verification run uses; raw \\.\T: volume
+          # opens fail in the runner context.
+          $env:DATAWIZARD_SCAN = $vhd
           $env:DATAWIZARD_TOUR = '1'
           $env:DATAWIZARD_WINDOW = '1360x840'
           $out = Join-Path $env:RUNNER_TEMP 'shots'

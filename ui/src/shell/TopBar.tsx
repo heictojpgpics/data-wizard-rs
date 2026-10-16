@@ -58,15 +58,15 @@ export function TopBar() {
   }, []);
 
   return (
-    <header className="dw-topbar" onDoubleClick={onDoubleClick}>
-      <div className="dw-brand" data-drag>
+    <header className="dw-topbar" data-tauri-drag-region onDoubleClick={onDoubleClick}>
+      <div className="dw-brand" data-tauri-drag-region>
         <span className="dw-brand-mark">
           <BrandGlyph size={22} />
         </span>
         <span className="dw-brand-name">Data Wizard</span>
       </div>
 
-      <nav className="dw-steps" aria-label="Wizard steps" data-drag>
+      <nav className="dw-steps" aria-label="Wizard steps">
         {STEPS.map((s, i) => {
           const active = stage === s.id;
           const done = stepDone(i);
@@ -80,7 +80,7 @@ export function TopBar() {
         })}
       </nav>
 
-      <div className="dw-topbar-spacer" data-drag />
+      <div className="dw-topbar-spacer" data-tauri-drag-region />
 
       <div className="dw-readonly-chip" title="Scanning only reads from the source. Recovery writes go to the destination you choose.">
         <ShieldCheckIcon size={13} />

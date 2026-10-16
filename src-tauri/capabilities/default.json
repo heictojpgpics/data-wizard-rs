@@ -1,11 +1,24 @@
 {
   "$schema": "https://schema.tauri.app/config/2/capability",
   "identifier": "default",
-  "description": "Minimum capability set: core runtime, folder picker for recovery destinations, window geometry",
-  "windows": ["main"],
+  "description": "Minimum capability set: core runtime, folder picker for recovery destinations, window geometry. Window-management surface: drag + the Windows caption verbs + set-title/set-theme \u2014 the custom chrome (decorations:false) and the CI tour driver speak the same core verbs; without the explicit allows they silently no-op (the DiskGenie session-17 lesson: every capture stayed default-sized through the window steps).",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "dialog:default",
-    "window-state:default"
+    "window-state:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-minimize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-size",
+    "core:window:allow-center",
+    "core:window:allow-set-title",
+    "core:window:allow-set-theme",
+    "core:window:allow-show",
+    "core:event:default"
   ]
 }
